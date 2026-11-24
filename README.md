@@ -12,39 +12,31 @@ New AI replies include clickable citations and expandable **Sources & assumption
 
 Technical claims pass receipt validation and a separate evidence audit using the selected feature model and effort. One revision is allowed before an unverifiable reply is rejected. This adds model usage and latency; it reduces unsupported feedback rather than guaranteeing correctness. The editor profile is Java 25; the judge runtime remains unknown until explicitly established.
 
-## Getting Started
+## Getting Started (Local Self-Hosting)
+
+DuoLeetCode is designed to be self-hosted on **`127.0.0.1`** on your own machine (macOS or Linux). All practice data, recordings, snapshots, and diagnostics stay in local SQLite files, and your LeetCode session cookies remain inside your browser.
 
 ### Prerequisites
 
-- **Node.js 26+** (uses built-in `node:sqlite`) and **npm**
+- **Node.js 26+** (uses built-in `node:sqlite`), **npm**, and **Git**
+- **JDK 25** (needed **once** on a fresh clone so `npm run java:prepare` can build the in-browser Java language-server JARs; normal app use runs Java inside the browser via CheerpJ)
 - **A Chromium browser** (Chrome, Chromium, Brave, Arc, Dia, or Edge) in a normal, non-incognito profile
-- **JDK 25** (needed only once on a fresh clone to compile the in-browser Java language-server assets; normal app use runs Java inside the browser via CheerpJ)
-- **Codex CLI, Claude Code CLI, and/or Antigravity CLI (`agy`)** *(optional, for AI coaching & problem selection)* — reuses your existing local sign-in (`codex login`, `claude login`, or `agy acp --login`)
+- **At least one AI runtime** *(optional — needed for AI coaching, Java help, and problem selection; reuses existing local CLI subscriptions with no API keys required)*:
+  - **OpenAI (Codex):** Codex CLI (`npm install -g @openai/codex`) → `codex login`
+  - **Claude (Claude SDK · ACP):** Claude Code CLI (`npm install -g @anthropic-ai/claude-code`) → `claude auth login` *(or set `ANTHROPIC_API_KEY`; `@agentclientprotocol/claude-agent-acp` is installed automatically by `npm install`)*
+  - **Gemini (Antigravity · ACP):** Antigravity CLI (`agy`) on `PATH` → `agy acp --login`
 
 ---
 
-### 1. Install the LeetCode Browser Extension
-
-DuoLeetCode talks to LeetCode through an unpacked Manifest V3 browser extension (**DuoLeetCode Local Bridge** `v0.1.6`) so your LeetCode session cookies stay inside your browser and never touch the local server.
-
-1. Open your Chromium browser and navigate to **`chrome://extensions`**.
-2. Enable **Developer mode** (toggle in the top-right corner).
-3. Click **Load unpacked** and select the **`spikes/leetcode/extension`** folder inside this repository.
-4. Confirm **DuoLeetCode Local Bridge** appears and is enabled.
-
-> **Updating the extension later:** Whenever `spikes/leetcode/extension` changes, open `chrome://extensions` and click the **Reload (`↻`)** icon on **DuoLeetCode Local Bridge**.
-
----
-
-### 2. Install Dependencies & Prepare Java Assets
-
-Install Node packages:
+### 1. Clone, Install Dependencies & Prepare Java Assets
 
 ```sh
+git clone https://github.com/Imminent-Latency/duoleetcode.git
+cd duoleetcode
 npm install
 ```
 
-On a **fresh clone**, build the in-browser Java 25 completion JARs once (downloads pinned JDT LS / `javacs` + Maven automatically; requires `JAVA_HOME` pointing to JDK 25):
+On a **fresh clone**, build the in-browser Java 25 completion JARs **before** running `npm run dev` or `npm run build` (downloads pinned Eclipse JDT LS, `javacs`, and Maven once; requires `JAVA_HOME` pointing to JDK 25 and internet access):
 
 ```sh
 JAVA_HOME=/path/to/jdk-25 npm run java:prepare
@@ -52,15 +44,40 @@ JAVA_HOME=/path/to/jdk-25 npm run java:prepare
 
 ---
 
-### 3. Start the Webserver
+### 2. Install the LeetCode Browser Extension
 
- Always keep port **`4318`** — the browser extension only accepts requests from `http://127.0.0.1:4318` and `http://localhost:4318`.
+DuoLeetCode talks to LeetCode through an unpacked Manifest V3 browser extension (**DuoLeetCode Local Bridge** `v0.1.6`) so your LeetCode session cookies stay inside your browser and never touch the Node server. The unpacked extension in `spikes/leetcode/extension` is ready to load out of the box.
+
+1. Open your Chromium browser and navigate to **`chrome://extensions`**.
+2. Enable **Developer mode** (toggle in the top-right corner).
+3. Click **Load unpacked** and select the **`spikes/leetcode/extension`** folder inside this repository.
+4. Confirm **DuoLeetCode Local Bridge** (`0.1.6`) appears and is enabled.
+
+> **Updating the extension later:** After pulling changes to `spikes/leetcode/extension` (or regenerating it via `npm run leetcode:extension`), open `chrome://extensions` and click **Reload (`↻`)** on **DuoLeetCode Local Bridge**.
+
+---
+
+### 3. Authenticate an AI Runtime (Optional)
+
+Sign in to whichever provider(s) you plan to use on the same machine running the server:
+
+| Team / Provider | Host Setup | Subscription / Auth |
+| --- | --- | --- |
+| **OpenAI Team (Low)** *(Astra + Sol)* | Install `codex` CLI (`@agentclientprotocol/codex-acp` is bundled) | Run `codex login` (ChatGPT Plus / Pro / Team) |
+| **Claude Team (Low)** *(Opus 5.5 + Sonnet 5.5)* | `@agentclientprotocol/claude-agent-acp` & `@anthropic-ai/claude-agent-sdk` are installed by `npm install`; install `claude` CLI for subscription auth | Run `claude auth login` (Claude Pro / Max) or export `ANTHROPIC_API_KEY` |
+| **Gemini Team (Low)** *(Gemini 4 Neon + 3.8 Flash)* | Install Antigravity CLI (`agy`) on `PATH` | Run `agy acp --login` (Google AI / Antigravity plan) |
+
+---
+
+### 4. Start the Webserver
+
+Keep the server bound to loopback (`127.0.0.1` / `localhost`, default port **`4318`**) — the browser extension only accepts requests from local loopback origins, and the server has no multi-user auth layer (**do not expose it on `0.0.0.0` or a public network**).
 
 - **Development server:**
   ```sh
   npm run dev
   ```
-- **Production server** (faster page loads for regular practice):
+- **Production server** (recommended for regular practice — faster page loads):
   ```sh
   npm run build
   npm start
@@ -74,11 +91,24 @@ Open **[http://127.0.0.1:4318/](http://127.0.0.1:4318/)** in the **same Chromium
 
 ---
 
-### 4. Connect Accounts in the App
+### 5. First-Run Setup in the App
 
-- **LeetCode:** If your browser isn't signed in to LeetCode yet, click **Sign in to LeetCode** on **Today** or **Connections**. A centered sign-in popup opens, logs you in, and closes itself automatically once connected (no open LeetCode tab needs to stay open afterward). You can also try the offline local exercise anytime via **Connections → Open a demo assessment**.
-- **AI Coaching (Codex, Claude SDK · ACP, and Antigravity Gemini · ACP):** DuoLeetCode discovers your locally signed-in runtimes automatically—**Codex** (`codex app-server` / `@agentclientprotocol/codex-acp`), **Claude** (`@agentclientprotocol/claude-agent-acp` powered by `@anthropic-ai/claude-agent-sdk`), and **Antigravity** (`agy acp` for Gemini 4 & 3.8 Flash models). No API keys are needed; existing local subscription sign-ins are reused. Open **Agent settings** in the sidebar to pick a **Role-paired Low-effort team** (**OpenAI Team**: Astra + Sol, **Claude Team**: Opus 5.5 + Sonnet 5.5, or **Gemini Team**: Gemini 4 Neon + Gemini 3.8 Flash—pairing flagship models for reflection, feedback, and coaching with fast models for Java help and next-problem planning), switch all features to one model, or mix any of the discovered models per feature under **Custom**. Settings save locally in `.local/agent-settings.json`.
-- **In-browser Java:** `javacs` runs in a Web Worker (Java 25 preview profile) for semantic completion and compiler diagnostics; **Run** and **Submit** execute on LeetCode's judge.
+1. **LeetCode:** Click **Sign in to LeetCode** on **Today** or **Connections**. A centered sign-in popup opens, logs you in, and closes itself automatically once connected (no LeetCode tab needs to stay open afterward). You can also try the offline local exercise anytime via **Connections → Open a demo assessment**.
+2. **Choose your AI Team in Agent settings:** Before `.local/agent-settings.json` exists, the default baseline model is `gpt-6.1-sol` (Codex). If you are using **Claude** or **Gemini / Antigravity** (or want the two-tier Astra + Sol OpenAI pairing), open **Agent settings** in the left sidebar, select **OpenAI Team (Low)**, **Claude Team (Low)**, or **Gemini Team (Low)**—or customize individual features—and click **Save agent settings**.
+3. **In-browser Java:** `javacs` warms automatically in a Web Worker (Java 25 preview profile; requires internet/CDN access for CheerpJ runtime assets) for semantic completion and compiler diagnostics, while **Run** and **Submit** execute on LeetCode's judge.
+
+### Optional Self-Hosting Environment Variables
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `DUO_DATA_DIR` | Directory for SQLite databases and snapshots | macOS: `~/Library/Application Support/DuoLeetCode`<br>Linux: `$XDG_DATA_HOME/duoleetcode` or `~/.local/share/duoleetcode` |
+| `DUO_BACKUP_DIR` | Directory for automatic startup/hourly SQLite backups (set to another disk for drive-failure protection) | `<DUO_DATA_DIR>/backups` |
+| `DUO_DATABASE` | Override the practice SQLite file path | `<DUO_DATA_DIR>/practice.sqlite` |
+| `DUO_TRACE_DATABASE` | Override the agent diagnostics & usage SQLite file path | `<DUO_DATA_DIR>/diagnostics.sqlite` |
+| `DUO_SETTINGS_FILE` | Override the saved agent settings JSON path | `.local/agent-settings.json` |
+| `DUO_AGENT_MODEL` | Override default baseline model before `.local/agent-settings.json` is created | `gpt-6.1-sol` |
+| `DUO_PORT` | Override local HTTP port | `4318` |
+| `DUO_CODEX_BIN` / `DUO_CLAUDE_BIN` / `DUO_AGY_BIN` | Explicit binary paths if `codex`, `claude`, or `agy` are outside standard `PATH` | Auto-discovered on `PATH` |
 
 ## What's implemented
 
@@ -137,7 +167,7 @@ Run `DUO_DATABASE=:memory: DUO_TRACE_DATABASE=.local/question-review-update.sqli
 - `lib/recording.ts`: atomic edit application, checkpoint replay, and candidate moments.
 - `lib/browser.ts`: extension RPC and IndexedDB recovery buffer.
 - `lib/java.ts`, `public/java/worker.js`: browser JVM/LSP adapter.
-- `lib/agents.ts`: local Codex app-server protocol, scoped evidence tool, role prompts and output schemas.
+- `lib/agents.ts`, `lib/acp-runtime.ts`, `tools/acp-mcp-bridge.mjs`: local Codex app-server and ACP v1 runtimes (Claude Agent SDK, Antigravity Gemini, Codex ACP), private Unix-socket MCP bridge, scoped evidence tools, role prompts, and output schemas.
 - `lib/agent-settings.ts`: shared feature registry, platform presets and capability validation; `lib/agent-settings-store.ts` owns local persistence.
 - `lib/java-reference.ts`, `lib/java-help-service.ts`, and `components/java-help.tsx`: scoped documentation tool, recorded reference conversation, and assessment chat.
 - `lib/reflection-policy.ts`: model-independent coaching policy; `lib/reflection.ts` owns structured evidence validation.
@@ -167,11 +197,11 @@ Restore checks integrity and always writes a new file. Inspect the restored libr
 
 ## Agentic problem prescription
 
-**Today** selects one timed Java problem using real practice history, imported historical sessions, corrected skill evidence, and active planning preferences. The planner searches your connected LeetCode catalog, inspects a result's statement, and verifies account access and Java support before presenting it. The browser bridge performs only catalog reads; authentication stays in your browser. The existing extension needs no update.
+**Today** selects one timed Java problem using real practice history, imported historical sessions, corrected skill evidence, and active planning preferences. The planner searches your connected LeetCode catalog, inspects a result's statement, and verifies account access and Java support before presenting it. The browser bridge performs only catalog reads; authentication stays in your browser.
 
 **Why this problem?** shows the selected evidence and its original source links. **Choose another** excludes the current suggestion without counting it as an attempt or a skill signal. **Prepare session** carries the suggested timebox into preparation; the timer starts only when you start the assessment. An unfinished assessment or learning session takes priority. Manual catalog browsing remains available.
 
-Prescription uses **Agent settings → Next activity**, including its configured model and effort (currently Sol / Low). It offers no solution hints or editorials. Tool calls are bounded; an unavailable bridge or model produces a retryable error instead of a hidden fixed recommendation. A failed alternate search preserves the last verified suggestion.
+Prescription uses **Agent settings → Next activity**, including its configured model and effort (such as Sol, Sonnet 5.5, or Gemini 3.8 Flash at Low). It offers no solution hints or editorials. Tool calls are bounded; an unavailable bridge or model produces a retryable error instead of a hidden fixed recommendation. A failed alternate search preserves the last verified suggestion.
 
 The latest prescription is reused across refreshes for up to a day while its history, evidence, preferences, and model settings remain unchanged. Its evidence receipt, model/effort, source references, and skipped choices are stored in SQLite `memory_uses` and travel with **Memory usage receipts** in snapshots/exports. A reset or correction invalidates in-flight stale selections. This is evidence-informed selection, not a calibrated spaced-repetition or mastery model.
 
@@ -181,7 +211,7 @@ Open **Coach memory** in the sidebar. **Preferences** shows what the coach may r
 
 **Skill evidence** searches dated observations from real assessments, original focused-practice responses, later coached understanding, and already-imported notes. Sources retain their attempt, quote, evaluation revision, and assistance context. Correct a coach interpretation or exclude it from future historical retrieval without rewriting the original record. Earlier assessments remain inspectable. This ledger is evidence, not a permanent mastery score. **What the coach used** records which preference revisions and historical observations were supplied to each successful agent run.
 
-Memory is available after a real assessment ends and to the next-problem planner before an assessment. Assessment-time Java help and test sessions do not receive personal practice history. Current corrections accompany the current attempt, and historical retrieval honors exclusions. Preferences never override technical evidence or assessment boundaries. The existing role harnesses share scoped memory tools; no separate memory agent or higher reasoning setting is required. Every agent remains at Low effort with the existing Astra/Sol model choices.
+Memory is available after a real assessment ends and to the next-problem planner before an assessment. Assessment-time Java help and test sessions do not receive personal practice history. Current corrections accompany the current attempt, and historical retrieval honors exclusions. Preferences never override technical evidence or assessment boundaries. The existing role harnesses share scoped memory tools; no separate memory agent or higher reasoning setting is required. Every agent remains at Low effort by default using the active role-paired team (Astra/Sol, Opus/Sonnet, or Gemini 4 Neon/3.8 Flash) or Custom choices.
 
 Memory, evidence, corrections, and usage receipts live in the same SQLite file as their practice library and are included in snapshots and JSON exports. The schema migration indexes existing records only; the broader Pages import remains a preview. Implementations are in `lib/learner-memory.ts`, `lib/learner-context.ts`, and `components/coach-memory.tsx`.
 
