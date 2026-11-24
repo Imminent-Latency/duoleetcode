@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "DuoLeetCode Local Bridge",
+  "version": "0.1.6",
+  "description": "Use your existing LeetCode session from DuoLeetCode without opening LeetCode tabs or exporting login cookies.",
+  "minimum_chrome_version": "120",
+  "incognito": "not_allowed",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1ucd7nw11RIdD3ZPW+BpREktkWlKT1W/HrGxAoYi5fDeuNswOTnDNCFAYZA19QfRDAEUI4dIh2cCi94C6XZ5S5uyZ/sHDK3nT35c8e16vMSWrsQTYFqICNQ8bkLATD8Ff0paGGVWlL8c594gTzwWD4Qzt7J7n51QzR4cLMdtu+CV7aR9uqkE9uMwBaHamCg5gGkdwoBHfLu8wEVr0umcs2qul6GWYLxOkrprQ2U1F+WsXAfz8ipVzqeiwKNcUhuwznS7RvnQB0ULb9d1SWBnu+HbNzHBvt1Rgq7IO8bVadzQ9wSAuAgaRvt3O46vR6jva5gdnQcKsRdlX2fAjlZ3MQIDAQAB",
+  "permissions": [
+    "cookies",
+    "storage",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "https://leetcode.com/*"
+  ],
+  "background": {
+    "service_worker": "background.mjs",
+    "type": "module"
+  },
+  "externally_connectable": {
+    "matches": [
+      "http://127.0.0.1/*",
+      "http://localhost/*"
+    ]
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src https://leetcode.com"
+  }
+}

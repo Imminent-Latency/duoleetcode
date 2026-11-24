@@ -1,0 +1,353 @@
+{
+  "id": "00000000-0000-4000-a000-000000000121",
+  "problem": {
+    "questionId": "121",
+    "questionFrontendId": "121",
+    "title": "Best Time to Buy and Sell Stock",
+    "titleSlug": "best-time-to-buy-and-sell-stock",
+    "difficulty": "Easy",
+    "content": "<p>You are given an array <code>prices</code> where <code>prices[i]</code> is the price of a given stock on the <code>i<sup>th</sup></code> day.</p>\n\n<p>You want to maximize your profit by choosing a <strong>single day</strong> to buy one stock and choosing a <strong>different day in the future</strong> to sell that stock.</p>\n\n<p>Return <em>the maximum profit you can achieve from this transaction</em>. If you cannot achieve any profit, return <code>0</code>.</p>\n\n<p>&nbsp;</p>\n<p><strong class=\"example\">Example 1:</strong></p>\n\n<pre>\n<strong>Input:</strong> prices = [7,1,5,3,6,4]\n<strong>Output:</strong> 5\n<strong>Explanation:</strong> Buy on day 2 (price = 1) and sell on day 5 (price = 6), profit = 6-1 = 5.\nNote that buying on day 2 and selling on day 1 is not allowed because you must buy before you sell.\n</pre>\n\n<p><strong class=\"example\">Example 2:</strong></p>\n\n<pre>\n<strong>Input:</strong> prices = [7,6,4,3,1]\n<strong>Output:</strong> 0\n<strong>Explanation:</strong> In this case, no transactions are done and the max profit = 0.\n</pre>\n\n<p>&nbsp;</p>\n<p><strong>Constraints:</strong></p>\n\n<ul>\n\t<li><code>1 &lt;= prices.length &lt;= 10<sup>5</sup></code></li>\n\t<li><code>0 &lt;= prices[i] &lt;= 10<sup>4</sup></code></li>\n</ul>\n",
+    "javaStarter": "class Solution {\n    public int maxProfit(int[] prices) {\n        \n    }\n}",
+    "exampleInputs": {
+      "raw": "[7,1,5,3,6,4]\n[7,6,4,3,1]"
+    },
+    "metadata": {
+      "params": [
+        {
+          "name": "prices",
+          "type": "integer[]"
+        }
+      ]
+    },
+    "topicTags": [
+      {
+        "name": "Array"
+      },
+      {
+        "name": "Dynamic Programming"
+      }
+    ],
+    "locked": false
+  },
+  "budgetMs": 1500000,
+  "createdAt": 1795061802640,
+  "deadline": 1795065734420,
+  "phase": "review",
+  "initialSource": "class Solution {\n    public int maxProfit(int[] prices) {\n        \n    }\n}",
+  "source": "import java.util.HashMap;\nimport java.util.Arrays;\nimport java.util.PriorityQueue;\nimport java.util.Comparator;\nimport java.util.Stack;\nimport java.util.ArrayDeque;\nclass Solution {\n    record Price(int price, int day) {}\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        PriorityQueue<Price> minPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price));\n        PriorityQueue<Price> maxPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price).reversed());\n\n        for (int i = 0; i < prices.length; i++) {\n            minPrices.add(new Price(prices[i], i));\n            maxPrices.add(new Price(prices[i], i));\n        }\n\n        while (!minPrices.isEmpty()) {\n            Price currPrice = minPrices.poll();\n\n            ArrayDeque<Price> placeholderPrices = new ArrayDeque<>();\n            while (!maxPrices.isEmpty()) {\n                Price maxPrice = maxPrices.poll();\n                placeholderPrices.add(maxPrice);\n\n                if (currPrice.day() < maxPrice.day())\n\n            }\n            \n        }\n        \n        \n\n        return profit;\n    }\n}",
+  "version": 1165,
+  "lastSeq": 1185,
+  "pauses": [
+    {
+      "start": 1795062790700,
+      "end": 1795062801503
+    },
+    {
+      "start": 1795062852843,
+      "end": 1795065260236
+    },
+    {
+      "start": 1795065262452,
+      "end": 1795065276036
+    }
+  ],
+  "exposure": "new",
+  "exposureSource": "reported",
+  "jobs": [],
+  "evaluations": [],
+  "annotations": [],
+  "demonstration": true,
+  "javaHelp": [
+    {
+      "id": "5b236ed9-b3bb-490d-8b44-6f39a25d0c29",
+      "question": "what is the runtime of heapify?",
+      "requestSeq": 274,
+      "askedAt": 1795062325153.6,
+      "state": "ready",
+      "editor": {
+        "file": "Solution.java",
+        "source": "recording",
+        "seq": 274,
+        "cursor": {
+          "line": 12,
+          "column": 29,
+          "lineText": "        Arrays.sort(prices);"
+        }
+      },
+      "answer": "“Heapify” can mean two things, assuming constant-time comparisons:\n\n- **Build a heap from all n elements, bottom-up:** **O(n)**. OpenJDK 25’s [`PriorityQueue.heapify()`](https://github.com/openjdk/jdk/blob/jdk-25%2B36/src/java.base/share/classes/java/util/PriorityQueue.java#L640-L755) uses this approach.\n- **Sift down a single node:** **O(log n)** worst case, because it can descend the heap’s height ([source](https://github.com/openjdk/jdk/blob/jdk-25%2B36/src/java.base/share/classes/java/util/PriorityQueue.java#L640-L755)).",
+      "kind": "reference",
+      "topics": [
+        "heapify",
+        "time complexity"
+      ],
+      "sources": [
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/PriorityQueue.html",
+        "https://github.com/openjdk/jdk/blob/jdk-25%2B36/src/java.base/share/classes/java/util/PriorityQueue.java#L640-L755"
+      ],
+      "generatedAt": 1795062357922,
+      "deliveredAt": 1795062357945,
+      "responseSeq": 275
+    },
+    {
+      "id": "76eb75c5-cfbf-49d3-9c61-9005f2b7dbf4",
+      "question": "remind me how to create a record containing two int values?",
+      "requestSeq": 300,
+      "askedAt": 1795062433057.9,
+      "state": "ready",
+      "editor": {
+        "file": "Solution.java",
+        "source": "recording",
+        "seq": 300,
+        "cursor": {
+          "line": 4,
+          "column": 24,
+          "lineText": "    record priceToIndex"
+        }
+      },
+      "answer": "In Java 25, declare the two components in parentheses:\n\n```java\nrecord Pair(int first, int second) {}\n\nPair p = new Pair(3, 7);\nint a = p.first();\nint b = p.second();\n```\n\nThe constructor and component accessor methods are generated automatically ([JLS §8.10](https://docs.oracle.com/javase/specs/jls/se25/html/jls-8.html#jls-8.10)).",
+      "kind": "reference",
+      "topics": [
+        "records",
+        "record declaration",
+        "accessors"
+      ],
+      "sources": [
+        "https://docs.oracle.com/javase/specs/jls/se25/html/jls-8.html#jls-8.10"
+      ],
+      "generatedAt": 1795062453845,
+      "deliveredAt": 1795062453876,
+      "responseSeq": 301
+    },
+    {
+      "id": "8e94c241-7e61-4ec0-9184-18bbc40055f8",
+      "question": "how would I pick the value used for a heap using a record like this?",
+      "requestSeq": 302,
+      "askedAt": 1795062473023.4,
+      "state": "ready",
+      "editor": {
+        "file": "Solution.java",
+        "source": "recording",
+        "seq": 302,
+        "cursor": {
+          "line": 4,
+          "column": 24,
+          "lineText": "    record priceToIndex"
+        }
+      },
+      "answer": "Pass a comparator that selects the record component you want to order by. Generic Java 25 example:\n\n```java\nimport java.util.Comparator;\nimport java.util.PriorityQueue;\n\nrecord Entry(int score, int id) {}\n\nPriorityQueue<Entry> heap =\n    new PriorityQueue<>(Comparator.comparingInt(Entry::score));\n```\n\n[`comparingInt`](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/Comparator.html#comparingInt(java.util.function.ToIntFunction)) uses `score()` as the comparison key. The entry with the **smallest score** is at the [queue’s head](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/PriorityQueue.html). To order by the other component instead, use `Entry::id`.",
+      "kind": "reference",
+      "topics": [
+        "PriorityQueue",
+        "Comparator.comparingInt",
+        "records"
+      ],
+      "sources": [
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/Comparator.html#comparingInt(java.util.function.ToIntFunction)",
+        "https://docs.oracle.com/javase/specs/jls/se25/html/jls-8.html#jls-8.10.3",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/PriorityQueue.html"
+      ],
+      "generatedAt": 1795062496467,
+      "deliveredAt": 1795062496498,
+      "responseSeq": 303
+    },
+    {
+      "id": "2a117cbf-c95b-4f21-8a61-11b2a1305133",
+      "question": "how do you define min/max priority queue?",
+      "requestSeq": 487,
+      "askedAt": 1795062674263.7,
+      "state": "ready",
+      "editor": {
+        "file": "Solution.java",
+        "source": "recording",
+        "seq": 487,
+        "cursor": {
+          "line": 10,
+          "column": 29,
+          "lineText": "        PriorityQueue<Price>"
+        }
+      },
+      "answer": "In Java 25, use an ascending comparator for a **min-heap**, and reverse it for a **max-heap**:\n\n```java\nimport java.util.Comparator;\nimport java.util.PriorityQueue;\n\nrecord Entry(int score, int id) {}\n\nComparator<Entry> byScore = Comparator.comparingInt(Entry::score);\nPriorityQueue<Entry> minHeap = new PriorityQueue<>(byScore);\nPriorityQueue<Entry> maxHeap = new PriorityQueue<>(byScore.reversed());\n```\n\n[`comparingInt`](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/Comparator.html#comparingInt(java.util.function.ToIntFunction)) selects the comparison key; [`reversed()`](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/Comparator.html#reversed()) reverses the ordering. A [`PriorityQueue`](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/PriorityQueue.html) places the least element under that ordering at its head.\n\n[`peek()`](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/PriorityQueue.html#peek()) returns an **`Entry`**, not its score: one with the smallest score for `minHeap`, or largest for `maxHeap`, without removing it. It returns `null` when empty.",
+      "kind": "reference",
+      "topics": [
+        "PriorityQueue",
+        "Comparator",
+        "min-heap",
+        "max-heap"
+      ],
+      "sources": [
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/PriorityQueue.html",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/Comparator.html#reversed()",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/Comparator.html#comparingInt(java.util.function.ToIntFunction)",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/PriorityQueue.html#peek()",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/PriorityQueue.html",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/Comparator.html#comparingInt(java.util.function.ToIntFunction)",
+        "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/Comparator.html#reversed()"
+      ],
+      "generatedAt": 1795062724614,
+      "deliveredAt": 1795062724652,
+      "responseSeq": 559
+    }
+  ],
+  "endedAt": 1795065734420,
+  "sealed": true,
+  "reflection": {
+    "messages": []
+  },
+  "exposureUpdatedAt": 1795065788429,
+  "events": [
+    {
+      "seq": 274,
+      "at": 1795062325153.6,
+      "type": "assistance",
+      "detail": "Java help: what is the runtime of heapify?",
+      "assistanceId": "5b236ed9-b3bb-490d-8b44-6f39a25d0c29",
+      "assistanceStage": "request"
+    },
+    {
+      "seq": 275,
+      "at": 1795062357914.1,
+      "type": "assistance",
+      "detail": "Java reference reply requested for display",
+      "assistanceId": "5b236ed9-b3bb-490d-8b44-6f39a25d0c29",
+      "assistanceStage": "response"
+    },
+    {
+      "seq": 300,
+      "at": 1795062433057.9,
+      "type": "assistance",
+      "detail": "Java help: remind me how to create a record containing two int values?",
+      "assistanceId": "76eb75c5-cfbf-49d3-9c61-9005f2b7dbf4",
+      "assistanceStage": "request"
+    },
+    {
+      "seq": 301,
+      "at": 1795062453868.3,
+      "type": "assistance",
+      "detail": "Java reference reply requested for display",
+      "assistanceId": "76eb75c5-cfbf-49d3-9c61-9005f2b7dbf4",
+      "assistanceStage": "response"
+    },
+    {
+      "seq": 302,
+      "at": 1795062473023.4,
+      "type": "assistance",
+      "detail": "Java help: how would I pick the value used for a heap using a record like this?",
+      "assistanceId": "8e94c241-7e61-4ec0-9184-18bbc40055f8",
+      "assistanceStage": "request"
+    },
+    {
+      "seq": 303,
+      "at": 1795062496495.4,
+      "type": "assistance",
+      "detail": "Java reference reply requested for display",
+      "assistanceId": "8e94c241-7e61-4ec0-9184-18bbc40055f8",
+      "assistanceStage": "response"
+    },
+    {
+      "seq": 364,
+      "at": 1795062575539.7,
+      "type": "edit",
+      "edits": [
+        {
+          "offset": 174,
+          "length": 256,
+          "text": ""
+        }
+      ],
+      "version": 357,
+      "origin": "editor"
+    },
+    {
+      "seq": 487,
+      "at": 1795062674263.7,
+      "type": "assistance",
+      "detail": "Java help: how do you define min/max priority queue?",
+      "assistanceId": "2a117cbf-c95b-4f21-8a61-11b2a1305133",
+      "assistanceStage": "request"
+    },
+    {
+      "seq": 559,
+      "at": 1795062724650.7,
+      "type": "assistance",
+      "detail": "Java reference reply requested for display",
+      "assistanceId": "2a117cbf-c95b-4f21-8a61-11b2a1305133",
+      "assistanceStage": "response"
+    },
+    {
+      "seq": 1185,
+      "at": 1795065734420,
+      "type": "finish",
+      "detail": "time budget reached"
+    }
+  ],
+  "checkpoints": [
+    {
+      "seq": 0,
+      "source": "class Solution {\n    public int maxProfit(int[] prices) {\n        \n    }\n}"
+    },
+    {
+      "seq": 273,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nclass Solution {\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        HashMap<Integer, Integer> priceMap = new HashMap<>();\n\n        for (int i = 0; i < prices.length; i++) {\n            priceMap.put(prices[i], i);\n        }\n\n        Arrays.sort(prices);\n\n        for (int price : prices) {\n            if ()\n        }\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 274,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nclass Solution {\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        HashMap<Integer, Integer> priceMap = new HashMap<>();\n\n        for (int i = 0; i < prices.length; i++) {\n            priceMap.put(prices[i], i);\n        }\n\n        Arrays.sort(prices);\n\n        for (int price : prices) {\n            if ()\n        }\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 275,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nclass Solution {\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        HashMap<Integer, Integer> priceMap = new HashMap<>();\n\n        for (int i = 0; i < prices.length; i++) {\n            priceMap.put(prices[i], i);\n        }\n\n        Arrays.sort(prices);\n\n        for (int price : prices) {\n            if ()\n        }\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 299,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nclass Solution {\n    record priceToIndex\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        HashMap<Integer, Integer> priceMap = new HashMap<>();\n\n        for (int i = 0; i < prices.length; i++) {\n            priceMap.put(prices[i], i);\n        }\n\n        Arrays.sort(prices);\n\n        for (int price : prices) {\n            if ()\n        }\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 300,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nclass Solution {\n    record priceToIndex\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        HashMap<Integer, Integer> priceMap = new HashMap<>();\n\n        for (int i = 0; i < prices.length; i++) {\n            priceMap.put(prices[i], i);\n        }\n\n        Arrays.sort(prices);\n\n        for (int price : prices) {\n            if ()\n        }\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 301,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nclass Solution {\n    record priceToIndex\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        HashMap<Integer, Integer> priceMap = new HashMap<>();\n\n        for (int i = 0; i < prices.length; i++) {\n            priceMap.put(prices[i], i);\n        }\n\n        Arrays.sort(prices);\n\n        for (int price : prices) {\n            if ()\n        }\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 302,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nclass Solution {\n    record priceToIndex\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        HashMap<Integer, Integer> priceMap = new HashMap<>();\n\n        for (int i = 0; i < prices.length; i++) {\n            priceMap.put(prices[i], i);\n        }\n\n        Arrays.sort(prices);\n\n        for (int price : prices) {\n            if ()\n        }\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 303,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nclass Solution {\n    record priceToIndex\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        HashMap<Integer, Integer> priceMap = new HashMap<>();\n\n        for (int i = 0; i < prices.length; i++) {\n            priceMap.put(prices[i], i);\n        }\n\n        Arrays.sort(prices);\n\n        for (int price : prices) {\n            if ()\n        }\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 363,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nclass Solution {\n    record Price(int price, int day) {}\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        HashMap<Integer, Integer> priceMap = new HashMap<>();\n\n        for (int i = 0; i < prices.length; i++) {\n            priceMap.put(prices[i], i);\n        }\n\n        Arrays.sort(prices);\n\n        for (int price : prices) {\n            if ()\n        }\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 364,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nclass Solution {\n    record Price(int price, int day) {}\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 486,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nimport java.util.PriorityQueue;\nclass Solution {\n    record Price(int price, int day) {}\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        PriorityQueue<Price> minPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price));\n        PriorityQueue<Price>\n\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 487,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nimport java.util.PriorityQueue;\nclass Solution {\n    record Price(int price, int day) {}\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        PriorityQueue<Price> minPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price));\n        PriorityQueue<Price>\n\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 558,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nimport java.util.PriorityQueue;\nclass Solution {\n    record Price(int price, int day) {}\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        PriorityQueue<Price> minPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price));\n        PriorityQueue<Price> maxPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price));\n\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 559,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nimport java.util.PriorityQueue;\nclass Solution {\n    record Price(int price, int day) {}\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        PriorityQueue<Price> minPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price));\n        PriorityQueue<Price> maxPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price));\n\n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 1184,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nimport java.util.PriorityQueue;\nimport java.util.Comparator;\nimport java.util.Stack;\nimport java.util.ArrayDeque;\nclass Solution {\n    record Price(int price, int day) {}\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        PriorityQueue<Price> minPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price));\n        PriorityQueue<Price> maxPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price).reversed());\n\n        for (int i = 0; i < prices.length; i++) {\n            minPrices.add(new Price(prices[i], i));\n            maxPrices.add(new Price(prices[i], i));\n        }\n\n        while (!minPrices.isEmpty()) {\n            Price currPrice = minPrices.poll();\n\n            ArrayDeque<Price> placeholderPrices = new ArrayDeque<>();\n            while (!maxPrices.isEmpty()) {\n                Price maxPrice = maxPrices.poll();\n                placeholderPrices.add(maxPrice);\n\n                if (currPrice.day() < maxPrice.day())\n\n            }\n            \n        }\n        \n        \n\n        return profit;\n    }\n}"
+    },
+    {
+      "seq": 1185,
+      "source": "import java.util.HashMap;\nimport java.util.Arrays;\nimport java.util.PriorityQueue;\nimport java.util.Comparator;\nimport java.util.Stack;\nimport java.util.ArrayDeque;\nclass Solution {\n    record Price(int price, int day) {}\n\n    public int maxProfit(int[] prices) {\n        int profit = 0;\n        PriorityQueue<Price> minPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price));\n        PriorityQueue<Price> maxPrices = new PriorityQueue<>(Comparator.comparingInt(Price::price).reversed());\n\n        for (int i = 0; i < prices.length; i++) {\n            minPrices.add(new Price(prices[i], i));\n            maxPrices.add(new Price(prices[i], i));\n        }\n\n        while (!minPrices.isEmpty()) {\n            Price currPrice = minPrices.poll();\n\n            ArrayDeque<Price> placeholderPrices = new ArrayDeque<>();\n            while (!maxPrices.isEmpty()) {\n                Price maxPrice = maxPrices.poll();\n                placeholderPrices.add(maxPrice);\n\n                if (currPrice.day() < maxPrice.day())\n\n            }\n            \n        }\n        \n        \n\n        return profit;\n    }\n}"
+    }
+  ]
+}

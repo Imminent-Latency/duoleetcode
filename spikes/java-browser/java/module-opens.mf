@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Main-Class: ModuleOpensProbe
+Add-Opens: jdk.compiler/com.sun.tools.javac.api
+

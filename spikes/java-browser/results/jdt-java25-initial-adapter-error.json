@@ -1,0 +1,64 @@
+{
+  "started": "2026-11-04T03:06:05.750Z",
+  "browser": "156.0.8078.4",
+  "mode": "jdt",
+  "version": "25",
+  "events": [
+    {
+      "type": "stage",
+      "ms": 0,
+      "message": "Loading CheerpJ 5.0",
+      "version": 25,
+      "mode": "jdt"
+    },
+    {
+      "type": "runtime-ready",
+      "ms": 645
+    },
+    {
+      "type": "java-ready",
+      "ms": 3271,
+      "version": "25.0.5.0.3-internal / /lt/25/"
+    },
+    {
+      "type": "stage",
+      "ms": 3271,
+      "message": "Preparing Eclipse JDT LS filesystem"
+    },
+    {
+      "type": "filesystem-ready",
+      "ms": 4684,
+      "message": "prepared 110 files"
+    },
+    {
+      "type": "engine-started",
+      "ms": 4693
+    },
+    {
+      "type": "engine-status",
+      "ms": 4694,
+      "message": "starting Equinox"
+    },
+    {
+      "type": "engine-status",
+      "ms": 5792,
+      "message": "failed: java.lang.NoSuchMethodException: org.eclipse.equinox.launcher.Main.run([Ljava.lang.String;,java.lang.Runnable)"
+    },
+    {
+      "type": "stderr",
+      "ms": 5792,
+      "message": "java.lang.NoSuchMethodException: org.eclipse.equinox.launcher.Main.run([Ljava.lang.String;,java.lang.Runnable)\n\tat java.lang.Class.getMethod(Unknown Source)\n\tat BrowserJdtBridge.lambda$start$0(Unknown Source)\n\tat BrowserJdtBridge$$Lambda.run(Unknown Source)\n\tat java.lang.Thread.runWith(Unknown Source)\n\tat java.lang.Thread.run(Unknown Source)\n"
+    },
+    {
+      "type": "error",
+      "ms": 5793,
+      "message": "Error: failed: java.lang.NoSuchMethodException: org.eclipse.equinox.launcher.Main.run([Ljava.lang.String;,java.lang.Runnable)",
+      "stack": "Error: failed: java.lang.NoSuchMethodException: org.eclipse.equinox.launcher.Main.run([Ljava.lang.String;,java.lang.Runnable)\n    at http://127.0.0.1:4317/worker.js?mode=jdt&java=25:47:13"
+    }
+  ],
+  "console": [],
+  "failures": [],
+  "finished": true,
+  "mainThreadResponsive": "DuoLeetCode · Browser Java experiment",
+  "ended": "2026-11-04T03:06:11.884Z"
+}

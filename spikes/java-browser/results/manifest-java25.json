@@ -1,0 +1,35 @@
+{
+  "started": "2026-11-04T03:16:24.131Z",
+  "browser": "156.0.8078.4",
+  "mode": "manifest",
+  "version": "25",
+  "options": "",
+  "events": [
+    {
+      "type": "stage",
+      "ms": 6,
+      "message": "Loading CheerpJ 5.0",
+      "version": 25,
+      "mode": "manifest"
+    },
+    {
+      "type": "runtime-ready",
+      "ms": 687
+    },
+    {
+      "type": "done",
+      "ms": 3620,
+      "exitCode": 0
+    }
+  ],
+  "console": [
+    {
+      "type": "log",
+      "text": "MODULE_OPEN=true\n"
+    }
+  ],
+  "failures": [],
+  "finished": true,
+  "mainThreadResponsive": "DuoLeetCode · Browser Java experiment",
+  "ended": "2026-11-04T03:16:28.268Z"
+}

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en" style="color-scheme:dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DuoLeetCode · Browser Java experiment</title>
+<style>
+*{box-sizing:border-box}body{background:#101218;color:#e3e7ef;font:16px/1.6 system-ui;margin:48px auto;max-width:1000px;padding:0 24px}h1{font-size:36px;line-height:1.2;letter-spacing:-1px;margin:12px 0 20px}h2{font-size:19px;margin-top:28px}p,small{color:#a7b1c9}small{font-size:13px}button,select,input{font:inherit;border-radius:8px;padding:10px 15px;border:1px solid #343b50;background:#191e2b;color:#e3e7ef}button{cursor:pointer;font-weight:600}button.primary{background:#98a4ff;color:#101218;border:0}button:disabled{opacity:.4;cursor:default}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #b9c2ff;outline-offset:3px}.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:28px 0}.metric{padding:20px;background:#191d28;border:1px solid #2c3242;border-radius:12px}.metric strong{display:block;font-size:28px;line-height:1.5}.status{min-height:28px;color:#c6cfff}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;text-align:left}th{font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:#98a3bc}th,td{padding:13px 12px;border-bottom:1px solid #2b3140}td:first-child{padding-left:0}.pass{color:#7de1b2}.fail{color:#ffacac}pre{font:12px/1.6 ui-monospace,monospace;background:#191d28;padding:16px;border-radius:10px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto}summary{cursor:pointer;color:#a7b1c9;margin-top:28px}input{width:100%;margin-top:8px}label{font-size:14px;color:#b5bed2}footer{margin:30px 0;color:#8290ac;font-size:13px}@media(max-width:600px){body{margin-top:24px}h1{font-size:29px}.metrics{grid-template-columns:1fr}.metric strong{font-size:24px}}
+</style>
+</head>
+<body>
+<small>DUOLEETCODE / LOCAL EXPERIMENT</small>
+<h1>Java intelligence in your browser</h1>
+<p>Test real Java suggestions without a local language-server process. This experiment checks the engine; the Next.js assessment app and Monaco integration come afterward.</p>
+<div class="actions">
+<button class="primary" id="start">Run completion checks</button>
+<button id="stop" disabled>Stop</button>
+<label for="engine">Engine</label><select id="engine"><option value="javacs-jar">javacs · browser JVM</option><option value="jdt">Eclipse JDT LS · browser JVM</option><option value="smoke">JVM startup only</option></select>
+</div>
+<p class="status" id="status" role="status">Ready to start. Java runs in a background browser worker.</p>
+<div class="metrics">
+<div class="metric"><small>Engine initialization</small><strong id="startup">—</strong></div>
+<div class="metric"><small>First completion request</small><strong id="first">—</strong></div>
+<div class="metric"><small>Later requests · median</small><strong id="warm">—</strong></div>
+</div>
+<h2>Completion checks</h2>
+<div class="table-wrap"><table><thead><tr><th>Scenario</th><th>Result</th><th>Latest request</th><th>Suggestions</th></tr></thead><tbody id="checks"><tr><td colspan="4">Map · generic return types · priority queue · custom node · String</td></tr></tbody></table></div>
+<h2>Try typing while Java starts</h2>
+<label for="typing">This field stays on the page’s main thread.</label>
+<input id="typing" placeholder="The engine runs separately in a worker…" autocomplete="off">
+<details><summary>Runtime log and timing details</summary><pre id="log">No checks have run.</pre></details>
+<footer>CheerpJ 5.0 · Java 25 preview · synthetic Java fixtures. Initial runtime assets load from Leaning Technologies’ CDN. These checks do not yet restrict suggestions to Java 8.</footer>
+<script type="module">
+const $=id=>document.getElementById(id);
+window.probe={events:[],done:false,started:false,heartbeat:{samples:0,maxDelayMs:0,delaysOver50ms:0}};
+const query=new URLSearchParams(location.search);
+if([...$('engine').options].some(o=>o.value===query.get('mode'))) $('engine').value=query.get('mode');
+window.startProbe=()=>{
+  if(window.probe.started&&!window.probe.done)return;
+  window.probe={events:[],done:false,started:true,heartbeat:{samples:0,maxDelayMs:0,delaysOver50ms:0}};
+  $('start').disabled=true;$('engine').disabled=true;$('stop').disabled=false;
+  $('log').textContent='';$('checks').textContent='';for(const id of ['startup','first','warm'])$(id).textContent='—';
+  $('status').textContent='Starting the browser JVM…';
+  const params=new URLSearchParams(location.search);
+  if(!params.has('mode')||[...$('engine').options].some(o=>o.value===params.get('mode')))params.set('mode',$('engine').value);
+  const worker=window.javaWorker=new Worker('/worker.js?'+params.toString());
+  const rows=new Map(),latencies=[];
+  let previous=performance.now();
+  const heartbeat=setInterval(()=>{
+    const now=performance.now(),delay=Math.max(0,now-previous-100);previous=now;
+    const metric=window.probe.heartbeat;metric.samples++;metric.maxDelayMs=Math.max(metric.maxDelayMs,Math.round(delay));if(delay>50)metric.delaysOver50ms++;
+  },100);
+  const stop=(message)=>{clearInterval(heartbeat);clearTimeout(watchdog);worker.terminate();window.probe.done=true;$('start').disabled=false;$('engine').disabled=false;$('stop').disabled=true;$('status').textContent=message;};
+  const watchdog=setTimeout(()=>{window.probe.events.push({type:'error',message:'Browser experiment timed out after four minutes'});stop('Timed out. See the runtime log.');},240000);
+  $('stop').onclick=()=>{window.probe.events.push({type:'cancelled'});stop('Stopped. Reload or run the checks again.');};
+  worker.onmessage=({data})=>{
+    window.probe.events.push(data);
+    $('log').textContent=($('log').textContent+JSON.stringify(data)+'\n').slice(-30000);
+    if(data.type==='stage')$('status').textContent=data.message;
+    if(data.type==='initialized'){$('startup').textContent=(data.ms/1000).toFixed(2)+' s';$('status').textContent='Engine ready. Checking suggestions…';}
+    if(data.type==='completion'){
+      if(!latencies.length)$('first').textContent=data.elapsedMs+' ms';
+      latencies.push(data.elapsedMs);
+      const later=latencies.slice(1).sort((a,b)=>a-b);if(later.length)$('warm').textContent=later[Math.floor(later.length/2)]+' ms';
+      if(!rows.has(data.name)){const row=document.createElement('tr');for(let i=0;i<4;i++)row.append(document.createElement('td'));$('checks').append(row);rows.set(data.name,row);}
+      const cells=rows.get(data.name).children;cells[0].textContent=data.name;cells[1].textContent=data.passed?'Passed':'Failed';cells[1].className=data.passed?'pass':'fail';cells[2].textContent=data.elapsedMs+' ms';cells[3].textContent=data.count;
+    }
+    if(data.type==='done'){const failed=window.probe.events.some(e=>e.type==='completion'&&!e.passed);stop(failed?'Checks finished with failures.':'Checks complete.');}
+    if(data.type==='error')stop('The engine could not finish: '+data.message);
+  };
+  worker.onerror=event=>{window.probe.events.push({type:'error',message:event.message});stop('Browser error: '+event.message);};
+};
+$('start').onclick=window.startProbe;
+</script>
+</body>
+</html>

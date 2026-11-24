@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" style="color-scheme:dark"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DuoLeetCode · LeetCode integration</title><link rel="stylesheet" href="/style.css">
+</head><body>
+<header><div><small>DUOLEETCODE / EXTENSION SPIKE</small><h1>Practice here. Validate on LeetCode.</h1><p>Your existing login. Background requests. No LeetCode tab required.</p></div><div class="account"><span id="account">Checking extension…</span><button id="connect">Connect browser extension</button></div></header>
+<div id="notice" role="status" class="notice">Loading the problem list…</div>
+<details id="install-help"><summary>Install the local extension</summary><p>In your regular Chromium browser’s extension manager, enable Developer mode and load the unpacked folder below. Return here and connect. Your login remains in that browser.</p><code>spikes/leetcode/extension</code></details>
+<main>
+<aside>
+<form id="search-form"><label for="search">Find a problem</label><div class="search"><input id="search" placeholder="Title or keyword"><button>Search</button></div><label for="difficulty">Difficulty</label><select id="difficulty"><option value="">All difficulties</option><option value="EASY">Easy</option><option value="MEDIUM">Medium</option><option value="HARD">Hard</option></select></form>
+<p class="muted" id="catalog-count"></p><div id="problems" aria-label="Problem list"></div>
+<div class="paging"><button id="previous">Previous</button><button id="next">Next</button></div>
+</aside>
+<section class="workspace">
+<div class="problem-heading"><div><small id="problem-meta">Select a problem</small><h2 id="problem-title">Question</h2></div><a id="problem-link" target="_blank" rel="noreferrer">Open on LeetCode ↗</a></div>
+<iframe id="description" title="Problem description" sandbox=""></iframe>
+<div class="code-heading"><h2>Java solution</h2><button id="fixture">Load integration fixture</button></div>
+<textarea id="code" spellcheck="false" aria-label="Java solution" placeholder="Choose a problem to load its Java starter code."></textarea>
+<div class="input-heading"><h2>Example inputs</h2><span id="case-count" class="muted"></span></div>
+<textarea id="inputs" spellcheck="false" aria-label="Example inputs"></textarea>
+<p class="muted" id="transport-note">Run checks the editable example inputs. Submit creates a real submission and checks LeetCode’s full suite. Each request captures the current source.</p>
+<div class="actions"><button id="run" disabled>Run on LeetCode</button><button id="submit" class="primary" disabled>Submit on LeetCode</button><button id="resume" disabled>Resume last request</button></div>
+<div class="actions"><button id="copy-code" disabled>Copy Java solution</button><button id="copy-inputs" disabled>Copy example inputs</button></div>
+<div id="direct-result">
+<section class="result" aria-live="polite"><small>REMOTE JUDGE</small><h2 id="verdict">No result yet</h2><p id="job-meta" class="muted">Each result stays linked to the exact source snapshot that produced it.</p><a id="submission-link" target="_blank" rel="noreferrer" hidden>View submission on LeetCode ↗</a><pre id="result-detail"></pre></section>
+</div>
+<details><summary>Captured request record</summary><pre id="job-record">No extension request yet.</pre></details>
+<section class="result"><small>CONNECTION VALIDATION</small><h2>Problem and subscription access</h2><button id="check-access" disabled>Check problem access</button><button id="diagnostics">Check extension connection</button><button id="judge-diagnostics">Check judge connection</button><button id="export-evidence">Export test evidence</button><p>Judge connection checks send empty validation requests with no code. They do not run or submit a solution.</p><pre id="access-report">Not tested in this browser yet.</pre></section>
+</section>
+</main>
+<footer>LeetCode requests run inside the extension. The local server never receives your LeetCode session or CSRF token. No hidden tabs or offscreen pages are used.</footer>
+<script type="module" src="/app.js"></script></body></html>

@@ -1,0 +1,476 @@
+{
+  "started": "2026-11-04T03:18:49.287Z",
+  "browser": "156.0.8078.4",
+  "mode": "javacs-jar",
+  "version": "25",
+  "options": "",
+  "events": [
+    {
+      "type": "stage",
+      "ms": 6,
+      "message": "Loading CheerpJ 5.0",
+      "version": 25,
+      "mode": "javacs-jar"
+    },
+    {
+      "type": "runtime-ready",
+      "ms": 729
+    },
+    {
+      "type": "engine-started",
+      "ms": 794
+    },
+    {
+      "type": "engine-status",
+      "ms": 794,
+      "message": "starting executable JAR"
+    },
+    {
+      "type": "java-ready",
+      "ms": 3603,
+      "version": "25.0.5.0.3-internal",
+      "moduleOpen": true
+    },
+    {
+      "type": "engine-status",
+      "ms": 3613,
+      "message": "running javacs"
+    },
+    {
+      "type": "stderr",
+      "ms": 4272,
+      "message": "19:18:53.382\tINFO\tLSP connect\tReading messages from queue...\n19:18:53.397\tINFO\tLSP$1MessageReader run\tPlacing incoming messages on queue...\n"
+    },
+    {
+      "type": "initialized",
+      "ms": 4353,
+      "capabilities": {
+        "textDocumentSync": 2,
+        "hoverProvider": true,
+        "completionProvider": {
+          "resolveProvider": true,
+          "triggerCharacters": [
+            "."
+          ]
+        },
+        "signatureHelpProvider": {
+          "triggerCharacters": [
+            "(",
+            ","
+          ]
+        },
+        "referencesProvider": true,
+        "definitionProvider": true,
+        "workspaceSymbolProvider": true,
+        "documentSymbolProvider": true,
+        "documentFormattingProvider": true,
+        "codeLensProvider": {},
+        "foldingRangeProvider": true,
+        "codeActionProvider": true,
+        "renameProvider": {
+          "prepareProvider": true
+        }
+      }
+    },
+    {
+      "type": "notification",
+      "ms": 4630,
+      "method": "java/startProgress",
+      "params": {
+        "message": "Configure javac"
+      }
+    },
+    {
+      "type": "notification",
+      "ms": 4630,
+      "method": "java/reportProgress",
+      "params": {
+        "message": "Finding source roots",
+        "increment": -1
+      }
+    },
+    {
+      "type": "notification",
+      "ms": 4630,
+      "method": "java/reportProgress",
+      "params": {
+        "message": "Inferring class path",
+        "increment": -1
+      }
+    },
+    {
+      "type": "notification",
+      "ms": 4652,
+      "method": "java/reportProgress",
+      "params": {
+        "message": "Inferring doc path",
+        "increment": -1
+      }
+    },
+    {
+      "type": "notification",
+      "ms": 4652,
+      "method": "java/endProgress",
+      "params": null
+    },
+    {
+      "type": "stderr",
+      "ms": 4652,
+      "message": "19:18:53.990\tINFO\tScanClassPath jdkTopLevelClasses\tSearching for top-level classes in the JDK\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 5323,
+      "message": "19:18:54.671\tINFO\tScanClassPath jdkTopLevelClasses\tFound 14694 classes in the java platform\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 5352,
+      "message": "Class path:\nDoc path:\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 5771,
+      "message": "19:18:55.105\tWARNING\tDocs findSrcZip\tCouldn't find src.zip in \n19:18:55.108\tINFO\tScanClassPath classPathTopLevelClasses\tSearching for top-level classes in 0 classpath locations\n19:18:55.114\tINFO\tScanClassPath classPathTopLevelClasses\tFound 0 classes in classpath\n19:18:55.120\tINFO\tCompletionProvider complete\tComplete at Solution.java(5,9)...\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 6210,
+      "message": "19:18:55.538\tWARNING\tReusableCompiler getTask\tOptions changed from [-classpath, , --add-modules, ALL-MODULE-PATH, -proc:none, -g, -Xlint:cast, -Xlint:deprecation, -Xlint:empty, -Xlint:fallthrough, -Xlint:finally, -Xlint:path, -Xlint:unchecked, -Xlint:varargs, -Xlint:static] to [-classpath, , --add-modules, ALL-MODULE-PATH, -proc:none, -g, -Xlint:cast, -Xlint:deprecation, -Xlint:empty, -Xlint:fallthrough, -Xlint:finally, -Xlint:path, -Xlint:unchecked, -Xlint:varargs, -Xlint:static], creating new compiler\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 6524,
+      "message": "19:18:55.868\tINFO\tCompletionProvider compileAndComplete\t...compiled in 326ms\n19:18:55.872\tINFO\tCompletionProvider completeMemberSelect\t...complete members of map\n"
+    },
+    {
+      "type": "completion",
+      "ms": 6614,
+      "name": "Map members",
+      "repeat": false,
+      "elapsedMs": 2261,
+      "passed": true,
+      "count": 28,
+      "labels": [
+        "getClass",
+        "wait",
+        "getOrDefault",
+        "notifyAll",
+        "values",
+        "computeIfAbsent",
+        "replace",
+        "replaceAll",
+        "notify",
+        "containsValue",
+        "put",
+        "remove",
+        "compute",
+        "hashCode",
+        "get",
+        "putAll",
+        "merge",
+        "keySet",
+        "entrySet",
+        "containsKey",
+        "forEach",
+        "isEmpty",
+        "clear",
+        "computeIfPresent",
+        "size",
+        "equals",
+        "toString",
+        "putIfAbsent"
+      ]
+    },
+    {
+      "type": "stderr",
+      "ms": 6614,
+      "message": "19:18:55.941\tINFO\tCompletionProvider logCompletionTiming\t...found 28 items in 820 ms\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 6635,
+      "message": "19:18:55.972\tINFO\tCompletionProvider complete\tComplete at Solution.java(5,18)...\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 6675,
+      "message": "19:18:56.023\tINFO\tCompletionProvider compileAndComplete\t...compiled in 28ms\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 6725,
+      "message": "19:18:56.027\tINFO\tCompletionProvider completeMemberSelect\t...complete members of map.get(\"a\")\n"
+    },
+    {
+      "type": "completion",
+      "ms": 6752,
+      "name": "Generic return type",
+      "repeat": false,
+      "elapsedMs": 138,
+      "passed": true,
+      "count": 39,
+      "labels": [
+        "getClass",
+        "wait",
+        "notifyAll",
+        "replaceAll",
+        "getLast",
+        "removeLast",
+        "notify",
+        "remove",
+        "addLast",
+        "iterator",
+        "removeAll",
+        "stream",
+        "hashCode",
+        "getFirst",
+        "get",
+        "removeFirst",
+        "toArray",
+        "parallelStream",
+        "indexOf",
+        "add",
+        "subList",
+        "set",
+        "spliterator",
+        "forEach",
+        "containsAll",
+        "isEmpty",
+        "clear",
+        "sort",
+        "removeIf",
+        "lastIndexOf",
+        "contains",
+        "size",
+        "addAll",
+        "equals",
+        "listIterator",
+        "toString",
+        "addFirst",
+        "reversed",
+        "retainAll"
+      ]
+    },
+    {
+      "type": "stderr",
+      "ms": 6752,
+      "message": "19:18:56.075\tINFO\tCompletionProvider logCompletionTiming\t...found 39 items in 102 ms\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 6787,
+      "message": "19:18:56.103\tINFO\tCompletionProvider complete\tComplete at Solution.java(5,11)...\n19:18:56.133\tINFO\tCompletionProvider compileAndComplete\t...compiled in 17ms\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 6808,
+      "message": "19:18:56.136\tINFO\tCompletionProvider completeMemberSelect\t...complete members of queue\n19:18:56.157\tINFO\tCompletionProvider logCompletionTiming\t...found 29 items in 53 ms\n"
+    },
+    {
+      "type": "completion",
+      "ms": 6838,
+      "name": "PriorityQueue members",
+      "repeat": false,
+      "elapsedMs": 86,
+      "passed": true,
+      "count": 29,
+      "labels": [
+        "getClass",
+        "wait",
+        "notifyAll",
+        "poll",
+        "notify",
+        "remove",
+        "offer",
+        "iterator",
+        "removeAll",
+        "stream",
+        "hashCode",
+        "toArray",
+        "parallelStream",
+        "element",
+        "add",
+        "spliterator",
+        "forEach",
+        "containsAll",
+        "isEmpty",
+        "clear",
+        "peek",
+        "removeIf",
+        "comparator",
+        "contains",
+        "size",
+        "addAll",
+        "equals",
+        "toString",
+        "retainAll"
+      ]
+    },
+    {
+      "type": "stderr",
+      "ms": 6865,
+      "message": "19:18:56.190\tINFO\tCompletionProvider complete\tComplete at Solution.java(4,10)...\n19:18:56.214\tINFO\tCompletionProvider compileAndComplete\t...compiled in 14ms\n"
+    },
+    {
+      "type": "completion",
+      "ms": 6893,
+      "name": "Custom node fields",
+      "repeat": false,
+      "elapsedMs": 55,
+      "passed": true,
+      "count": 10,
+      "labels": [
+        "val",
+        "left",
+        "right",
+        "getClass",
+        "wait",
+        "hashCode",
+        "equals",
+        "notifyAll",
+        "toString",
+        "notify"
+      ]
+    },
+    {
+      "type": "stderr",
+      "ms": 6893,
+      "message": "19:18:56.216\tINFO\tCompletionProvider completeMemberSelect\t...complete members of node\n19:18:56.219\tINFO\tCompletionProvider logCompletionTiming\t...found 10 items in 28 ms\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 6917,
+      "message": "19:18:56.245\tINFO\tCompletionProvider complete\tComplete at Solution.java(3,10)...\n19:18:56.263\tINFO\tCompletionProvider compileAndComplete\t...compiled in 10ms\n19:18:56.265\tINFO\tCompletionProvider completeMemberSelect\t...complete members of text\n"
+    },
+    {
+      "type": "completion",
+      "ms": 6981,
+      "name": "String members",
+      "repeat": false,
+      "elapsedMs": 88,
+      "passed": true,
+      "count": 55,
+      "labels": [
+        "getClass",
+        "toCharArray",
+        "codePointAt",
+        "stripIndent",
+        "replace",
+        "compareTo",
+        "resolveConstantDesc",
+        "describeConstable",
+        "getBytes",
+        "split",
+        "strip",
+        "trim",
+        "toUpperCase",
+        "codePointBefore",
+        "equalsIgnoreCase",
+        "indexOf",
+        "compareToIgnoreCase",
+        "codePoints",
+        "toLowerCase",
+        "concat",
+        "matches",
+        "contains",
+        "endsWith",
+        "stripLeading",
+        "wait",
+        "indent",
+        "formatted",
+        "notifyAll",
+        "regionMatches",
+        "replaceFirst",
+        "isBlank",
+        "replaceAll",
+        "notify",
+        "substring",
+        "transform",
+        "splitWithDelimiters",
+        "hashCode",
+        "repeat",
+        "lines",
+        "codePointCount",
+        "translateEscapes",
+        "intern",
+        "getChars",
+        "contentEquals",
+        "length",
+        "isEmpty",
+        "subSequence",
+        "lastIndexOf",
+        "equals",
+        "toString",
+        "charAt",
+        "offsetByCodePoints",
+        "chars",
+        "startsWith",
+        "stripTrailing"
+      ]
+    },
+    {
+      "type": "stderr",
+      "ms": 6981,
+      "message": "19:18:56.302\tINFO\tCompletionProvider logCompletionTiming\t...found 55 items in 56 ms\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 7003,
+      "message": "19:18:56.332\tINFO\tCompletionProvider complete\tComplete at Solution.java(5,9)...\n19:18:56.350\tINFO\tCompletionProvider compileAndComplete\t...compiled in 11ms\n19:18:56.352\tINFO\tCompletionProvider completeMemberSelect\t...complete members of map\n"
+    },
+    {
+      "type": "completion",
+      "ms": 7029,
+      "name": "Map members",
+      "repeat": true,
+      "elapsedMs": 49,
+      "passed": true,
+      "count": 28,
+      "labels": [
+        "getClass",
+        "wait",
+        "getOrDefault",
+        "notifyAll",
+        "values",
+        "computeIfAbsent",
+        "replace",
+        "replaceAll",
+        "notify",
+        "containsValue",
+        "put",
+        "remove",
+        "compute",
+        "hashCode",
+        "get",
+        "putAll",
+        "merge",
+        "keySet",
+        "entrySet",
+        "containsKey",
+        "forEach",
+        "isEmpty",
+        "clear",
+        "computeIfPresent",
+        "size",
+        "equals",
+        "toString",
+        "putIfAbsent"
+      ]
+    },
+    {
+      "type": "done",
+      "ms": 7029
+    },
+    {
+      "type": "stderr",
+      "ms": 7029,
+      "message": "19:18:56.360\tINFO\tCompletionProvider logCompletionTiming\t...found 28 items in 27 ms\n"
+    }
+  ],
+  "console": [],
+  "failures": [],
+  "finished": true,
+  "mainThreadResponsive": "DuoLeetCode · Browser Java experiment",
+  "ended": "2026-11-04T03:18:57.554Z"
+}

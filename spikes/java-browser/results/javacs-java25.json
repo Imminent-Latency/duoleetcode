@@ -1,0 +1,206 @@
+{
+  "started": "2026-11-04T03:16:53.086Z",
+  "browser": "156.0.8078.4",
+  "mode": "javacs",
+  "version": "25",
+  "options": "launcher=manifest",
+  "events": [
+    {
+      "type": "stage",
+      "ms": 4,
+      "message": "Loading CheerpJ 5.0",
+      "version": 25,
+      "mode": "javacs"
+    },
+    {
+      "type": "runtime-ready",
+      "ms": 666
+    },
+    {
+      "type": "module-access-ready",
+      "ms": 3590,
+      "exitCode": 0
+    },
+    {
+      "type": "java-ready",
+      "ms": 3970,
+      "version": "25.0.5.0.3-internal / /lt/25/"
+    },
+    {
+      "type": "engine-started",
+      "ms": 3997
+    },
+    {
+      "type": "engine-status",
+      "ms": 3998,
+      "message": "starting javacs"
+    },
+    {
+      "type": "stderr",
+      "ms": 4567,
+      "message": "19:16:57.486\tINFO\tLSP connect\tReading messages from queue...\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 4603,
+      "message": "19:16:57.493\tINFO\tLSP$1MessageReader run\tPlacing incoming messages on queue...\n"
+    },
+    {
+      "type": "initialized",
+      "ms": 4670,
+      "capabilities": {
+        "textDocumentSync": 2,
+        "hoverProvider": true,
+        "completionProvider": {
+          "resolveProvider": true,
+          "triggerCharacters": [
+            "."
+          ]
+        },
+        "signatureHelpProvider": {
+          "triggerCharacters": [
+            "(",
+            ","
+          ]
+        },
+        "referencesProvider": true,
+        "definitionProvider": true,
+        "workspaceSymbolProvider": true,
+        "documentSymbolProvider": true,
+        "documentFormattingProvider": true,
+        "codeLensProvider": {},
+        "foldingRangeProvider": true,
+        "codeActionProvider": true,
+        "renameProvider": {
+          "prepareProvider": true
+        }
+      }
+    },
+    {
+      "type": "notification",
+      "ms": 4972,
+      "method": "java/startProgress",
+      "params": {
+        "message": "Configure javac"
+      }
+    },
+    {
+      "type": "notification",
+      "ms": 4972,
+      "method": "java/reportProgress",
+      "params": {
+        "message": "Finding source roots",
+        "increment": -1
+      }
+    },
+    {
+      "type": "notification",
+      "ms": 4972,
+      "method": "java/reportProgress",
+      "params": {
+        "message": "Inferring class path",
+        "increment": -1
+      }
+    },
+    {
+      "type": "notification",
+      "ms": 4972,
+      "method": "java/reportProgress",
+      "params": {
+        "message": "Inferring doc path",
+        "increment": -1
+      }
+    },
+    {
+      "type": "notification",
+      "ms": 4972,
+      "method": "java/endProgress",
+      "params": null
+    },
+    {
+      "type": "stderr",
+      "ms": 4972,
+      "message": "19:16:58.071\tINFO\tScanClassPath jdkTopLevelClasses\tSearching for top-level classes in the JDK\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 5617,
+      "message": "19:16:58.717\tINFO\tScanClassPath jdkTopLevelClasses\tFound 14694 classes in the java platform\nClass path:\nDoc path:\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 5894,
+      "message": "19:16:58.954\tWARNING\tDocs findSrcZip\tCouldn't find src.zip in \n19:16:58.957\tINFO\tScanClassPath classPathTopLevelClasses\tSearching for top-level classes in 0 classpath locations\n19:16:58.963\tINFO\tScanClassPath classPathTopLevelClasses\tFound 0 classes in classpath\n19:16:58.969\tINFO\tCompletionProvider complete\tComplete at Solution.java(5,9)...\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 6317,
+      "message": "19:16:59.407\tWARNING\tReusableCompiler getTask\tOptions changed from [-classpath, , --add-modules, ALL-MODULE-PATH, -proc:none, -g, -Xlint:cast, -Xlint:deprecation, -Xlint:empty, -Xlint:fallthrough, -Xlint:finally, -Xlint:path, -Xlint:unchecked, -Xlint:varargs, -Xlint:static] to [-classpath, , --add-modules, ALL-MODULE-PATH, -proc:none, -g, -Xlint:cast, -Xlint:deprecation, -Xlint:empty, -Xlint:fallthrough, -Xlint:finally, -Xlint:path, -Xlint:unchecked, -Xlint:varargs, -Xlint:static], creating new compiler\n"
+    },
+    {
+      "type": "stderr",
+      "ms": 6750,
+      "message": "19:16:59.773\tINFO\tCompletionProvider compileAndComplete\t...compiled in 361ms\n19:16:59.777\tINFO\tCompletionProvider completeMemberSelect\t...complete members of map\n19:16:59.840\tINFO\tCompletionProvider logCompletionTiming\t...found 28 items in 870 ms\n"
+    },
+    {
+      "type": "completion",
+      "ms": 6776,
+      "name": "Map members",
+      "repeat": false,
+      "elapsedMs": 2089,
+      "passed": true,
+      "count": 28,
+      "labels": [
+        "getClass",
+        "wait",
+        "getOrDefault",
+        "notifyAll",
+        "values",
+        "computeIfAbsent",
+        "replace",
+        "replaceAll",
+        "notify",
+        "containsValue",
+        "put",
+        "remove",
+        "compute",
+        "hashCode",
+        "get",
+        "putAll",
+        "merge",
+        "keySet",
+        "entrySet",
+        "containsKey",
+        "forEach",
+        "isEmpty",
+        "clear",
+        "computeIfPresent",
+        "size",
+        "equals",
+        "toString",
+        "putIfAbsent"
+      ]
+    },
+    {
+      "type": "error",
+      "ms": 6803,
+      "message": "Error: {\"code\":-32603,\"message\":\"Unable to make void com.sun.tools.javac.api.JavacTaskImpl.cleanup() accessible: module jdk.compiler does not \\\"opens com.sun.tools.javac.api\\\" to unnamed module @7af\"}",
+      "stack": "Error: {\"code\":-32603,\"message\":\"Unable to make void com.sun.tools.javac.api.JavacTaskImpl.cleanup() accessible: module jdk.compiler does not \\\"opens com.sun.tools.javac.api\\\" to unnamed module @7af\"}\n    at globalThis.BrowserLanguageClient.consume (http://127.0.0.1:4317/lsp-client.js:43:52)\n    at globalThis.BrowserLanguageClient.poll (http://127.0.0.1:4317/lsp-client.js:53:31)"
+    },
+    {
+      "type": "stderr",
+      "ms": 6803,
+      "message": "19:16:59.889\tINFO\tCompletionProvider complete\tComplete at Solution.java(5,18)...\n19:16:59.904\tSEVERE\tLSP connect\tUnable to make void com.sun.tools.javac.api.JavacTaskImpl.cleanup() accessible: module jdk.compiler does not \"opens com.sun.tools.javac.api\" to unnamed module @7af\njava.lang.reflect.InaccessibleObjectException: Unable to make void com.sun.tools.javac.api.JavacTaskImpl.cleanup() accessible: module jdk.compiler does not \"opens com.sun.tools.javac.api\" to unnamed module @7af\n\tat java.lang.reflect.AccessibleObject.throwInaccessibleObjectException(Unknown Source)\n\tat java.lang.reflect.AccessibleObject.checkCanSetAccessible(Unknown Source)\n\tat java.lang.reflect.AccessibleObject.checkCanSetAccessible(Unknown Source)\n\tat java.lang.reflect.Method.checkCanSetAccessible(Unknown Source)\n\tat java.lang.reflect.Method.setAccessible(Unknown Source)\n\tat org.javacs.ReusableCompiler$Borrow.close(Unknown Source)\n\tat org.javacs.JavaCompilerService.loadCompile(Unknown Source)\n\tat org.javacs.JavaCompilerService.compileBatch(Unknown Source)\n\tat org.javacs.JavaCompilerService.compile(Unknown Source)\n\tat org.javacs.completion.CompletionProvider.compileAndComplete(Unknown Source)\n\tat org.javacs.completion.CompletionProvider.complete(Unknown Source)\n\tat org.javacs.JavaLanguageServer.completion(Unknown Source)\n\tat org.javacs.lsp.LSP.connect(Unknown Source)\n\tat org.javacs.Main.main(Unknown Source)\n\tat java.lang.invoke.LambdaForm$DMH.invokeStatic(Unknown Source)\n\tat java.lang.invoke.LambdaForm$MH.invoke(Unknown Source)\n\tat java.lang.invoke.Invokers$Holder.invokeExact_MT(Unknown Source)\n\tat jdk.internal.reflect.DirectMethodHandleAccessor.invokeImpl(Unknown Source)\n\tat jdk.internal.reflect.DirectMethodHandleAccessor.invoke(Unknown Source)\n\tat java.lang.reflect.Method.invoke(Unknown Source)\n\tat BrowserJdtBridge.lambda$startJavacs$0(Unknown Source)\n\tat BrowserJdtBridge$$Lambda.run(Unknown Source)\n\tat java.lang.Thread.runWith(Unknown Source)\n\tat java.lang.Thread.run(Unknown Source)\n\n"
+    }
+  ],
+  "console": [
+    {
+      "type": "log",
+      "text": "MODULE_OPEN=true\n"
+    }
+  ],
+  "failures": [],
+  "finished": true,
+  "mainThreadResponsive": "DuoLeetCode · Browser Java experiment",
+  "ended": "2026-11-04T03:17:00.250Z"
+}
