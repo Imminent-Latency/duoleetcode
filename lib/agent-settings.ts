@@ -149,3 +149,105 @@ export function validateAgentChoice(choice: AgentChoice, models: AgentModel[]) {
     );
   return choice;
 }
+
+export type AgentTeamProfile = {
+  id: "openai-low" | "claude-low" | "gemini-low";
+  label: string;
+  provider: string;
+  philosophy: string;
+  deepModel: AgentModel;
+  fastModel: AgentModel;
+  features: AgentSettings["features"];
+};
+
+function pickFirstAvailable(
+  models: AgentModel[],
+  candidates: string[],
+): AgentModel | undefined {
+  for (const id of candidates) {
+    const found = models.find((m) => m.model === id);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function lowChoiceFor(m: AgentModel): AgentChoice {
+  return {
+    model: m.model,
+    effort: m.efforts.includes("low") ? "low" : m.efforts[0] ?? "low",
+  };
+}
+
+// Role-paired Low-effort team profiles: flagship model at Low effort for
+// nuanced pedagogical judgment (reflection, evaluation, coaching), paired with
+// fast workhorse model at Low effort for timed Java lookups and catalog planning.
+export function availableTeamProfiles(models: AgentModel[]): AgentTeamProfile[] {
+  const specs: Array<{
+    id: AgentTeamProfile["id"];
+    label: string;
+    provider: string;
+    philosophy: string;
+    deepCandidates: string[];
+    fastCandidates: string[];
+  }> = [
+    {
+      id: "openai-low",
+      label: "OpenAI Team (Low)",
+      provider: "Codex · ChatGPT",
+      philosophy:
+        "Astra for reflection, evaluation & coaching · Sol for Java help & next-problem planning",
+      deepCandidates: ["gpt-6-astra", "gpt-6.2-astra"],
+      fastCandidates: ["gpt-6.1-sol", "gpt-6.2-sol"],
+    },
+    {
+      id: "claude-low",
+      label: "Claude Team (Low)",
+      provider: "Claude SDK · ACP",
+      philosophy:
+        "Opus 5.5 for reflection, evaluation & coaching · Sonnet 5.5 for Java help & next-problem planning",
+      deepCandidates: ["claude-acp/opus", "claude-acp/fable", "claude-acp/claude-opus-5"],
+      fastCandidates: ["claude-acp/sonnet", "claude-acp/haiku", "claude-acp/claude-sonnet-5"],
+    },
+    {
+      id: "gemini-low",
+      label: "Gemini Team (Low)",
+      provider: "Antigravity · ACP",
+      philosophy:
+        "Gemini 4 Neon for reflection, evaluation & coaching · Gemini 3.8 Flash for Java help & next-problem planning",
+      deepCandidates: [
+        "agy-acp/gemini-4-neon",
+        "agy-acp/gemini-4-carbon",
+        "agy-acp/gemini-4-argon",
+      ],
+      fastCandidates: [
+        "agy-acp/gemini-3.8-flash",
+        "agy-acp/gemini-4-hydrogen",
+      ],
+    },
+  ];
+
+  const profiles: AgentTeamProfile[] = [];
+  for (const spec of specs) {
+    const deepModel = pickFirstAvailable(models, spec.deepCandidates);
+    const fastModel = pickFirstAvailable(models, spec.fastCandidates);
+    if (!deepModel || !fastModel) continue;
+    const deep = lowChoiceFor(deepModel);
+    const fast = lowChoiceFor(fastModel);
+    profiles.push({
+      id: spec.id,
+      label: spec.label,
+      provider: spec.provider,
+      philosophy: spec.philosophy,
+      deepModel,
+      fastModel,
+      features: {
+        reference: { ...fast },
+        reflection: { ...deep },
+        evaluation: { ...deep },
+        coaching: { ...deep },
+        planning: { ...fast },
+      },
+    });
+  }
+  return profiles;
+}

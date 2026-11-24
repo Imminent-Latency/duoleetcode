@@ -17,6 +17,7 @@
     "test": "tsx --test tests/*.test.ts",
     "agent:smoke": "tsx tools/agent-smoke.ts",
     "acp:smoke": "tsx tools/acp-smoke.ts",
+    "acp:workflow": "DUO_DATABASE=:memory: DUO_TRACE_DATABASE=.local/acp-workflow-eval.sqlite tsx tools/acp-workflow-eval.ts",
     "dev:test": "node tools/prepare-app.mjs && node tools/practice-server.mjs test",
     "practice:backup": "node tools/practice-server.mjs backup",
     "practice:restore": "node tools/practice-server.mjs restore"

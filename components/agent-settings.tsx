@@ -17,10 +17,12 @@ import { api } from "@/lib/browser";
 import {
   agentFeatures,
   agentPresets,
+  availableTeamProfiles,
   normalizeBackgroundSettings,
   resolveBackgroundSettings,
   type AgentModel,
   type AgentSettings as Settings,
+  type AgentTeamProfile,
 } from "@/lib/agent-settings";
 import type { UsageSummary } from "@/lib/agent-trace-types";
 
@@ -69,18 +71,21 @@ export default function AgentSettings() {
     }
     return [...groups.entries()].map(([group, items]) => ({ group, items }));
   })();
-  const applyModelToAllLow = (modelId: string | null) => {
-    if (!settings || !modelId) return;
-    const m = models.find((item) => item.model === modelId);
-    if (!m) return;
-    const effort = m.efforts.includes("low") ? "low" : m.efforts[0] ?? "low";
+  const teamProfiles = availableTeamProfiles(models);
+  const matchesProfile = (profile: AgentTeamProfile) =>
+    settings?.preset === "custom" &&
+    agentFeatures.every(
+      (f) =>
+        settings.features[f.id].model === profile.features[f.id].model &&
+        settings.features[f.id].effort === profile.features[f.id].effort,
+    );
+  const applyTeamProfile = (profile: AgentTeamProfile) => {
+    if (!settings) return;
     setNotice("");
     setSettings({
       ...settings,
       preset: "custom",
-      features: Object.fromEntries(
-        agentFeatures.map((f) => [f.id, { model: m.model, effort }]),
-      ) as Settings["features"],
+      features: structuredClone(profile.features),
     });
   };
   const save = async () => {
@@ -232,31 +237,82 @@ export default function AgentSettings() {
                 })()}
               </Stack>
             </Paper>
+            {teamProfiles.length > 0 && (
+              <Paper withBorder radius="md" p="xl">
+                <Stack gap="md">
+                  <div>
+                    <Title order={3}>Role-paired team profiles (Low effort)</Title>
+                    <Text size="sm" c="dimmed" mt={4}>
+                      Pairs each provider’s flagship reasoning model at Low
+                      effort for nuanced reflection, evaluation, and coaching
+                      with its fast coding model at Low effort for live Java
+                      help and problem selection — or customize any individual
+                      model below.
+                    </Text>
+                  </div>
+                  <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
+                    {teamProfiles.map((profile) => {
+                      const active = matchesProfile(profile);
+                      return (
+                        <Paper
+                          key={profile.id}
+                          withBorder
+                          radius="md"
+                          p="md"
+                          style={
+                            active
+                              ? {
+                                  borderColor:
+                                    "var(--mantine-color-teal-filled)",
+                                }
+                              : undefined
+                          }
+                        >
+                          <Stack gap="xs" justify="space-between" h="100%">
+                            <div>
+                              <Group justify="space-between" gap="xs">
+                                <Text fw={600} size="sm">
+                                  {profile.label}
+                                </Text>
+                                <Badge
+                                  size="xs"
+                                  variant="light"
+                                  color={active ? "teal" : "gray"}
+                                >
+                                  {active ? "Active" : profile.provider}
+                                </Badge>
+                              </Group>
+                              <Text size="xs" c="dimmed" mt={6}>
+                                {profile.philosophy}
+                              </Text>
+                            </div>
+                            <Button
+                              size="xs"
+                              variant={active ? "light" : "default"}
+                              disabled={busy || active}
+                              onClick={() => applyTeamProfile(profile)}
+                            >
+                              {active ? "Selected" : `Use ${profile.label}`}
+                            </Button>
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
+                  </SimpleGrid>
+                </Stack>
+              </Paper>
+            )}
             <Group justify="space-between" align="end">
               <div>
                 <Title order={3}>Feature configuration</Title>
                 <Text size="sm" c="dimmed" mt={2}>
-                  Choose models from Codex, Claude (Claude SDK · ACP), or
-                  Antigravity (Gemini · ACP).
+                  All discovered models across Codex, Claude (Claude SDK · ACP),
+                  and Antigravity (Gemini · ACP) can be mixed per feature.
                 </Text>
               </div>
-              <Group gap="sm">
-                <Select
-                  placeholder="Switch all features to model (Low)…"
-                  aria-label="Apply model across all features at Low effort"
-                  w={310}
-                  maw="100%"
-                  searchable
-                  clearable
-                  value={null}
-                  disabled={busy || models.length === 0}
-                  data={groupedModels}
-                  onChange={applyModelToAllLow}
-                />
-                <Badge variant="light">
-                  {custom ? "Custom controls" : "Set by Low"}
-                </Badge>
-              </Group>
+              <Badge variant="light">
+                {custom ? "Custom controls" : "Set by Low"}
+              </Badge>
             </Group>
             <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
               {agentFeatures.map((feature) => {

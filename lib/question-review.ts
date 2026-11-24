@@ -160,6 +160,13 @@ export function reviewedQuestions(review?: QuestionReview) {
     revision: review.revision,
     coverageComplete: review.coverageComplete,
     limitations: review.limitations,
+    sources: (review.sources ?? []).map(({ id, title, url, kind, version }) => ({
+      id,
+      title,
+      url,
+      kind,
+      version,
+    })),
     questions: review.questions.map(
       ({ question, verdict, askedMessageIds, surfacedMessageIds }) => ({
         ...question,

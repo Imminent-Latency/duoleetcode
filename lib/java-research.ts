@@ -200,7 +200,19 @@ export class JavaResearch {
       tier: SearchTier,
     ) => Promise<{ results: { title: string; url: string }[] }>,
     private readonly resolve = requestJavaSymbol,
-  ) {}
+    inheritedSources?: ResearchSource[],
+  ) {
+    if (inheritedSources?.length) {
+      const seen = new Set<string>();
+      for (const s of inheritedSources) {
+        if (!s?.id || seen.has(s.id)) continue;
+        seen.add(s.id);
+        this.bundle.sources.push({ ...s });
+        if (s.kind === "official-docs" || s.kind === "official-source")
+          this.primaryRead = true;
+      }
+    }
+  }
   private source(s: Omit<ResearchSource, "id" | "digest">) {
     const source = {
       ...s,

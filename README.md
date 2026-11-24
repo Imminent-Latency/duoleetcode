@@ -77,7 +77,7 @@ Open **[http://127.0.0.1:4318/](http://127.0.0.1:4318/)** in the **same Chromium
 ### 4. Connect Accounts in the App
 
 - **LeetCode:** If your browser isn't signed in to LeetCode yet, click **Sign in to LeetCode** on **Today** or **Connections**. A centered sign-in popup opens, logs you in, and closes itself automatically once connected (no open LeetCode tab needs to stay open afterward). You can also try the offline local exercise anytime via **Connections → Open a demo assessment**.
-- **AI Coaching (Codex, Claude SDK · ACP, and Antigravity Gemini · ACP):** DuoLeetCode discovers your locally signed-in runtimes automatically—**Codex** (`codex app-server` / `@agentclientprotocol/codex-acp`), **Claude** (`@agentclientprotocol/claude-agent-acp` powered by `@anthropic-ai/claude-agent-sdk`), and **Antigravity** (`agy acp` for Gemini 4 & 3.8 Flash models). No API keys are needed; existing local subscription sign-ins are reused. Open **Agent settings** in the sidebar to switch all features to any connected model at Low effort in one click, or mix models per feature under **Custom**. Settings save locally in `.local/agent-settings.json`.
+- **AI Coaching (Codex, Claude SDK · ACP, and Antigravity Gemini · ACP):** DuoLeetCode discovers your locally signed-in runtimes automatically—**Codex** (`codex app-server` / `@agentclientprotocol/codex-acp`), **Claude** (`@agentclientprotocol/claude-agent-acp` powered by `@anthropic-ai/claude-agent-sdk`), and **Antigravity** (`agy acp` for Gemini 4 & 3.8 Flash models). No API keys are needed; existing local subscription sign-ins are reused. Open **Agent settings** in the sidebar to pick a **Role-paired Low-effort team** (**OpenAI Team**: Astra + Sol, **Claude Team**: Opus 5.5 + Sonnet 5.5, or **Gemini Team**: Gemini 4 Neon + Gemini 3.8 Flash—pairing flagship models for reflection, feedback, and coaching with fast models for Java help and next-problem planning), switch all features to one model, or mix any of the discovered models per feature under **Custom**. Settings save locally in `.local/agent-settings.json`.
 - **In-browser Java:** `javacs` runs in a Web Worker (Java 25 preview profile) for semantic completion and compiler diagnostics; **Run** and **Submit** execute on LeetCode's judge.
 
 ## What's implemented
@@ -210,6 +210,7 @@ npm run leetcode:test
 npm run build
 npm run agent:smoke
 npm run acp:smoke
+npm run acp:workflow
 ```
 
 The tests cover atomic multi-cursor edits, Unicode/CRLF, undo/redo/IME outcomes, long-recording seeking, pause/deadline behavior, duplicate retries, conflicting events, source freezing, immutable first responses, origin checks, import insertion, conversation recovery, evidence validation, skip/manual exit, and the existing extension's security/judge behavior. `agent:smoke` makes a real small model request using the signed-in ChatGPT plan. `npx tsx tools/coaching-eval.ts` runs opt-in live coaching regressions against conceptual reasoning, misconceptions, bare agreement, and coached application without changing learner data.

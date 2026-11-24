@@ -347,7 +347,11 @@ export function resolveAcpAdapterSpec(
       label: "Antigravity (Gemini · ACP)",
       shortPrefix: "Antigravity",
       command: agyBin,
-      args: ["acp", "--include-default-customizations=false"],
+      args: [
+        "acp",
+        "--process-per-session",
+        "--include-default-customizations=false",
+      ],
       env: {},
     };
   }

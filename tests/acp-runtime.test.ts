@@ -15,7 +15,10 @@ import {
   parseAcpModelId,
 } from "../lib/acp-runtime";
 import { AgentRuntime } from "../lib/agents";
-import { lowSettings } from "../lib/agent-settings";
+import {
+  availableTeamProfiles,
+  lowSettings,
+} from "../lib/agent-settings";
 
 test("ACP JSONL decoder handles fragmented UTF-8 lines and rejects malformed or oversized payloads", () => {
   const received: any[] = [];
@@ -168,6 +171,30 @@ test("parseAcpModelId distinguishes ACP provider models from native Codex models
     provider: "agy-acp",
     rawModel: "gemini-4-neon",
   });
+
+  const profiles = availableTeamProfiles([
+    { model: "gpt-6-astra", name: "Astra", efforts: ["low", "high"] },
+    { model: "gpt-6.1-sol", name: "Sol", efforts: ["low", "medium"] },
+    { model: "claude-acp/opus", name: "Claude · Opus 5.5", efforts: ["low", "high"] },
+    { model: "claude-acp/sonnet", name: "Claude · Sonnet 5.5", efforts: ["low", "high"] },
+    { model: "agy-acp/gemini-4-neon", name: "Antigravity · Gemini 4 Neon", efforts: ["low", "high"] },
+    { model: "agy-acp/gemini-3.8-flash", name: "Antigravity · Gemini 3.8 Flash", efforts: ["low", "high"] },
+  ]);
+  assert.deepEqual(
+    profiles.map((p) => p.id),
+    ["openai-low", "claude-low", "gemini-low"],
+  );
+  const claudeTeam = profiles.find((p) => p.id === "claude-low")!;
+  assert.equal(claudeTeam.features.reflection.model, "claude-acp/opus");
+  assert.equal(claudeTeam.features.coaching.model, "claude-acp/opus");
+  assert.equal(claudeTeam.features.evaluation.model, "claude-acp/opus");
+  assert.equal(claudeTeam.features.reference.model, "claude-acp/sonnet");
+  assert.equal(claudeTeam.features.planning.model, "claude-acp/sonnet");
+
+  const geminiTeam = profiles.find((p) => p.id === "gemini-low")!;
+  assert.equal(geminiTeam.features.reflection.model, "agy-acp/gemini-4-neon");
+  assert.equal(geminiTeam.features.reference.model, "agy-acp/gemini-3.8-flash");
+  assert.equal(geminiTeam.features.planning.model, "agy-acp/gemini-3.8-flash");
 });
 
 test("AcpRuntimePool + AgentRuntime execute end-to-end ACP turns with MCP Unix-socket tools, JSON fence repair, and permission guard", async () => {
