@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "agent:smoke": "tsx tools/agent-smoke.ts",
+    "acp:smoke": "tsx tools/acp-smoke.ts",
     "dev:test": "node tools/prepare-app.mjs && node tools/practice-server.mjs test",
     "practice:backup": "node tools/practice-server.mjs backup",
     "practice:restore": "node tools/practice-server.mjs restore"
@@ -33,6 +34,8 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "^0.110.1",
+    "@agentclientprotocol/codex-acp": "^2.10.0",
     "@mantine/core": "^9.7.5",
     "@mantine/hooks": "^9.7.5",
     "@monaco-editor/loader": "^1.7.0",

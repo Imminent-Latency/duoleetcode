@@ -1275,8 +1275,8 @@ export default function Workspace() {
                   label="Your AI coach"
                   detail={
                     agentStatus?.signedIn
-                      ? "Connected through ChatGPT"
-                      : "Connect with ChatGPT sign-in"
+                      ? `Connected (${agentStatus.provider || "Local AI"})`
+                      : "Connect Codex, Claude, or Antigravity"
                   }
                 />
                 <Button
@@ -1393,55 +1393,76 @@ export default function Workspace() {
                 </span>
                 <h2>AI learning team</h2>
                 <p>
-                  An evaluator, coach, and planner with separate
-                  responsibilities. Feedback begins after the clock stops.
+                  Codex, Claude (Claude Agent SDK · ACP), and Antigravity
+                  (Gemini · ACP). Choose models per feature in Agent settings.
                 </p>
-                <ConnectionLine
-                  ok={!!agentStatus?.signedIn}
-                  label={
-                    agentStatus?.signedIn
-                      ? "ChatGPT connected"
-                      : "ChatGPT sign-in needed"
-                  }
-                  detail={
-                    agentStatus?.signedIn
-                      ? "Using your plan through the local Codex runtime."
-                      : "Your assessment and recording work without AI."
-                  }
-                />
-                <Button
-                  className="button secondary"
-                  disabled={!!busy}
-                  onClick={async () => {
-                    setBusy("Checking ChatGPT");
-                    try {
-                      const s = await api("/api/agent");
-                      setAgentStatus(s);
-                      if (!s.signedIn) {
-                        const login = await api("/api/agent", {
-                          action: "login",
-                        });
-                        window.open(
-                          login.authUrl,
-                          "_blank",
-                          "noopener,noreferrer",
-                        );
-                        setNotice(
-                          "Complete sign-in, then click Check connection.",
-                        );
-                      }
-                    } catch (e) {
-                      showError(e);
-                    } finally {
-                      setBusy("");
+                {Array.isArray(agentStatus?.providers) &&
+                agentStatus.providers.length > 0 ? (
+                  agentStatus.providers.map((p: any) => (
+                    <ConnectionLine
+                      key={p.id}
+                      ok={!!p.signedIn}
+                      label={`${p.name} · ${p.signedIn ? "Connected" : "Sign-in needed"}`}
+                      detail={p.detail}
+                    />
+                  ))
+                ) : (
+                  <ConnectionLine
+                    ok={!!agentStatus?.signedIn}
+                    label={
+                      agentStatus?.signedIn
+                        ? "AI runtime connected"
+                        : "AI sign-in needed"
                     }
-                  }}
-                >
-                  {agentStatus?.signedIn
-                    ? "Check connection"
-                    : "Sign in with ChatGPT"}
-                  <ArrowUpRight size={16} />
-                </Button>
+                    detail={
+                      agentStatus?.signedIn
+                        ? "Using your connected local runtime."
+                        : "Your assessment and recording work without AI."
+                    }
+                  />
+                )}
+                <div className="connection-actions">
+                  <Button
+                    className="button secondary"
+                    disabled={!!busy}
+                    onClick={async () => {
+                      setBusy("Checking AI runtimes");
+                      try {
+                        const s = await api("/api/agent");
+                        setAgentStatus(s);
+                        if (!s.codexSignedIn && !s.signedIn) {
+                          const login = await api("/api/agent", {
+                            action: "login",
+                          });
+                          window.open(
+                            login.authUrl,
+                            "_blank",
+                            "noopener,noreferrer",
+                          );
+                          setNotice(
+                            "Complete sign-in, then click Check connection.",
+                          );
+                        }
+                      } catch (e) {
+                        showError(e);
+                      } finally {
+                        setBusy("");
+                      }
+                    }}
+                  >
+                    {agentStatus?.signedIn
+                      ? "Refresh runtimes"
+                      : "Sign in with ChatGPT"}
+                    <ArrowUpRight size={16} />
+                  </Button>
+                  <Button
+                    className="button secondary"
+                    disabled={!!busy}
+                    onClick={() => navigate("settings")}
+                  >
+                    Choose models <ArrowRight size={16} />
+                  </Button>
+                </div>
               </Panel>
               <Panel className="panel connection-card">
                 <span className="large-icon">

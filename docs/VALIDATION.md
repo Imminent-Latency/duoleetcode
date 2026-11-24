@@ -288,3 +288,9 @@ Local evidence: `.local/leetcode-app-validation.json`; screenshots in `.local/sc
 - 22 extension tests (`npm run leetcode:test`) and 181 app tests (`npm test`, including `tests/leetcode-bridge.test.ts` covering all bridge states, popup window geometry, extension-managed COOP-immune popup lifecycle, sign-in watching, and cancellation), TypeScript checking, and the production build pass.
 - Verified state separation across `ready`, `signed-out`, `extension-missing`, `unsupported-browser`, `untrusted-origin`, `permissions-missing`, `verification-required`, `rate-limited`, and `network-error`, zero-cookie-leak `hasCsrfCookie()` / `LEETCODE_SESSION` presence checks in `0.1.6`, and `manifest.json` permissions remaining unchanged (`cookies`, `storage`, `declarativeNetRequestWithHostAccess`).
 - Restarted production server on `http://127.0.0.1:4318` with zero active/paused assessments or running traces; SHA-256 fingerprints of `practice.sqlite` and `.local/agent-settings.json` remained unchanged.
+
+
+### Multi-provider ACP migration (Claude Agent SDK & Antigravity Gemini) — November 23, 2026
+
+- 187 app tests (`npm test`, including `tests/acp-runtime.test.ts`), 22 extension tests (`npm run leetcode:test`), TypeScript checking, and the production build pass with zero new build warnings.
+- Live end-to-end ACP smoke validation (`npm run acp:smoke` → `.local/acp-smoke-report.json`) discovered 44 models across Codex (`pro`), Claude (`Claude SDK · ACP`, `max_5x`, 13 models), and Antigravity (`Gemini · ACP`, `Google AI Ultra`, 11 models), and passed live MCP Unix-socket tool execution + structured JSON validation on both `claude-acp/haiku` (`6.3s`) and `agy-acp/gemini-3.8-flash` (`3.8s`) in isolated `:memory:` traces without modifying `practice.sqlite` or `.local/agent-settings.json`.

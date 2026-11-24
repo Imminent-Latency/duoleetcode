@@ -19,7 +19,7 @@ Technical claims pass receipt validation and a separate evidence audit using the
 - **Node.js 26+** (uses built-in `node:sqlite`) and **npm**
 - **A Chromium browser** (Chrome, Chromium, Brave, Arc, Dia, or Edge) in a normal, non-incognito profile
 - **JDK 25** (needed only once on a fresh clone to compile the in-browser Java language-server assets; normal app use runs Java inside the browser via CheerpJ)
-- **Codex CLI** *(optional, for AI coaching & problem selection)* signed in with ChatGPT (`codex login`)
+- **Codex CLI, Claude Code CLI, and/or Antigravity CLI (`agy`)** *(optional, for AI coaching & problem selection)* — reuses your existing local sign-in (`codex login`, `claude login`, or `agy acp --login`)
 
 ---
 
@@ -77,7 +77,7 @@ Open **[http://127.0.0.1:4318/](http://127.0.0.1:4318/)** in the **same Chromium
 ### 4. Connect Accounts in the App
 
 - **LeetCode:** If your browser isn't signed in to LeetCode yet, click **Sign in to LeetCode** on **Today** or **Connections**. A centered sign-in popup opens, logs you in, and closes itself automatically once connected (no open LeetCode tab needs to stay open afterward). You can also try the offline local exercise anytime via **Connections → Open a demo assessment**.
-- **AI Coaching (ChatGPT):** The local `codex app-server` reuses your Codex CLI ChatGPT sign-in (or you can start sign-in from **Connections**). No API key is needed; plan limits apply. `DUO_CODEX_BIN` overrides the Codex binary path and `DUO_AGENT_MODEL` overrides the baseline model (default `gpt-6.1-sol`). **Agent settings** in the sidebar configures presets and background analysis toggles locally in `.local/agent-settings.json`.
+- **AI Coaching (Codex, Claude SDK · ACP, and Antigravity Gemini · ACP):** DuoLeetCode discovers your locally signed-in runtimes automatically—**Codex** (`codex app-server` / `@agentclientprotocol/codex-acp`), **Claude** (`@agentclientprotocol/claude-agent-acp` powered by `@anthropic-ai/claude-agent-sdk`), and **Antigravity** (`agy acp` for Gemini 4 & 3.8 Flash models). No API keys are needed; existing local subscription sign-ins are reused. Open **Agent settings** in the sidebar to switch all features to any connected model at Low effort in one click, or mix models per feature under **Custom**. Settings save locally in `.local/agent-settings.json`.
 - **In-browser Java:** `javacs` runs in a Web Worker (Java 25 preview profile) for semantic completion and compiler diagnostics; **Run** and **Submit** execute on LeetCode's judge.
 
 ## What's implemented
@@ -209,6 +209,7 @@ npm test
 npm run leetcode:test
 npm run build
 npm run agent:smoke
+npm run acp:smoke
 ```
 
 The tests cover atomic multi-cursor edits, Unicode/CRLF, undo/redo/IME outcomes, long-recording seeking, pause/deadline behavior, duplicate retries, conflicting events, source freezing, immutable first responses, origin checks, import insertion, conversation recovery, evidence validation, skip/manual exit, and the existing extension's security/judge behavior. `agent:smoke` makes a real small model request using the signed-in ChatGPT plan. `npx tsx tools/coaching-eval.ts` runs opt-in live coaching regressions against conceptual reasoning, misconceptions, bare agreement, and coached application without changing learner data.

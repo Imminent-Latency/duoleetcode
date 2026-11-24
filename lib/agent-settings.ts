@@ -101,7 +101,18 @@ export const agentSettingsSchema = z
   })
   .strict();
 export type AgentSettings = z.infer<typeof agentSettingsSchema>;
-export type AgentModel = { model: string; name: string; efforts: string[] };
+export type AgentProviderId =
+  | "codex"
+  | "claude-acp"
+  | "agy-acp"
+  | "codex-acp";
+export type AgentModel = {
+  model: string;
+  name: string;
+  efforts: string[];
+  provider?: AgentProviderId;
+  providerLabel?: string;
+};
 export function lowSettings(model: string): AgentSettings {
   return {
     version: 1,

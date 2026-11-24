@@ -56,6 +56,33 @@ export default function AgentSettings() {
     void load();
   }, []);
   const custom = settings?.preset === "custom";
+  const groupedModels = (() => {
+    const groups = new Map<string, { value: string; label: string }[]>();
+    for (const m of models) {
+      const groupName = m.providerLabel ?? "Connected runtime";
+      let items = groups.get(groupName);
+      if (!items) {
+        items = [];
+        groups.set(groupName, items);
+      }
+      items.push({ value: m.model, label: m.name });
+    }
+    return [...groups.entries()].map(([group, items]) => ({ group, items }));
+  })();
+  const applyModelToAllLow = (modelId: string | null) => {
+    if (!settings || !modelId) return;
+    const m = models.find((item) => item.model === modelId);
+    if (!m) return;
+    const effort = m.efforts.includes("low") ? "low" : m.efforts[0] ?? "low";
+    setNotice("");
+    setSettings({
+      ...settings,
+      preset: "custom",
+      features: Object.fromEntries(
+        agentFeatures.map((f) => [f.id, { model: m.model, effort }]),
+      ) as Settings["features"],
+    });
+  };
   const save = async () => {
     setBusy(true);
     setError("");
@@ -205,11 +232,31 @@ export default function AgentSettings() {
                 })()}
               </Stack>
             </Paper>
-            <Group justify="space-between">
-              <Title order={3}>Feature configuration</Title>
-              <Badge variant="light">
-                {custom ? "Custom controls" : "Set by Low"}
-              </Badge>
+            <Group justify="space-between" align="end">
+              <div>
+                <Title order={3}>Feature configuration</Title>
+                <Text size="sm" c="dimmed" mt={2}>
+                  Choose models from Codex, Claude (Claude SDK · ACP), or
+                  Antigravity (Gemini · ACP).
+                </Text>
+              </div>
+              <Group gap="sm">
+                <Select
+                  placeholder="Switch all features to model (Low)…"
+                  aria-label="Apply model across all features at Low effort"
+                  w={310}
+                  maw="100%"
+                  searchable
+                  clearable
+                  value={null}
+                  disabled={busy || models.length === 0}
+                  data={groupedModels}
+                  onChange={applyModelToAllLow}
+                />
+                <Badge variant="light">
+                  {custom ? "Custom controls" : "Set by Low"}
+                </Badge>
+              </Group>
             </Group>
             <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
               {agentFeatures.map((feature) => {
@@ -244,15 +291,17 @@ export default function AgentSettings() {
                         searchable
                         allowDeselect={false}
                         data={[
-                          ...models.map((m) => ({
-                            value: m.model,
-                            label: m.name,
-                          })),
+                          ...groupedModels,
                           ...(!selectedModel
                             ? [
                                 {
-                                  value: choice.model,
-                                  label: choice.model + " (unavailable)",
+                                  group: "Saved selection",
+                                  items: [
+                                    {
+                                      value: choice.model,
+                                      label: choice.model + " (unavailable)",
+                                    },
+                                  ],
                                 },
                               ]
                             : []),
