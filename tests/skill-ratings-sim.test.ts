@@ -25,7 +25,7 @@ export const DOMAINS = [
 
 export type DomainId = (typeof DOMAINS)[number];
 
-export const DOMAIN_ENTRY_FLOOR: Record<DomainId, number> = {
+export const CATALOG_DIFFICULTY_FLOOR: Record<DomainId, number> = {
   "arrays-strings": 800,
   "hashing-prefix": 800,
   "two-pointers-window": 800,
@@ -39,6 +39,12 @@ export const DOMAIN_ENTRY_FLOOR: Record<DomainId, number> = {
   "dynamic-programming": 800,
   greedy: 800,
   "math-bitwise": 800,
+};
+
+// Learner globalMu eligibility gate: all 12 Easy-backed domains remain ALWAYS eligible
+// regardless of how low globalMu drops; only backtracking requires Medium-level base rating.
+export const DOMAIN_MIN_GLOBAL_MU: Partial<Record<DomainId, number>> = {
+  backtracking: 980,
 };
 
 export const EXCLUDED_LIST_SLUGS = new Set([
@@ -101,14 +107,15 @@ export const TAG_PRIORITY_TABLE: ReadonlyArray<{
   { rank: 42, slug: "game-theory", domain: "math-bitwise", queryablePrimary: false },
   { rank: 43, slug: "randomized", domain: "math-bitwise", queryablePrimary: false },
   { rank: 44, slug: "brainteaser", domain: "math-bitwise", queryablePrimary: false },
-  { rank: 45, slug: "divide-and-conquer", domain: "trees-recursion", queryablePrimary: false },
-  { rank: 46, slug: "recursion", domain: "trees-recursion", queryablePrimary: false },
-  { rank: 47, slug: "matrix", domain: "arrays-strings", queryablePrimary: true },
-  { rank: 48, slug: "simulation", domain: "arrays-strings", queryablePrimary: true },
-  { rank: 49, slug: "enumeration", domain: "arrays-strings", queryablePrimary: false },
-  { rank: 50, slug: "iterator", domain: "arrays-strings", queryablePrimary: false },
-  { rank: 51, slug: "string", domain: "arrays-strings", queryablePrimary: true },
-  { rank: 52, slug: "array", domain: "arrays-strings", queryablePrimary: true },
+  { rank: 45, slug: "math", domain: "math-bitwise", queryablePrimary: true },
+  { rank: 46, slug: "divide-and-conquer", domain: "trees-recursion", queryablePrimary: false },
+  { rank: 47, slug: "recursion", domain: "trees-recursion", queryablePrimary: false },
+  { rank: 48, slug: "matrix", domain: "arrays-strings", queryablePrimary: true },
+  { rank: 49, slug: "simulation", domain: "arrays-strings", queryablePrimary: true },
+  { rank: 50, slug: "enumeration", domain: "arrays-strings", queryablePrimary: false },
+  { rank: 51, slug: "iterator", domain: "arrays-strings", queryablePrimary: false },
+  { rank: 52, slug: "string", domain: "arrays-strings", queryablePrimary: true },
+  { rank: 53, slug: "array", domain: "arrays-strings", queryablePrimary: true },
 ];
 
 const SLUG_TO_ENTRY = new Map(TAG_PRIORITY_TABLE.map((e) => [e.slug, e]));
@@ -116,16 +123,12 @@ const SLUG_TO_ENTRY = new Map(TAG_PRIORITY_TABLE.map((e) => [e.slug, e]));
 export function resolvePrimaryDomainFromSlugs(slugs: string[]): DomainId {
   let best: (typeof TAG_PRIORITY_TABLE)[number] | undefined;
   for (const s of slugs) {
-    if (s === "recursion") continue; // Handled after checking structural co-tags
+    if (s === "recursion") continue; // Checked after structural co-tags
     const entry = SLUG_TO_ENTRY.get(s);
     if (entry && (!best || entry.rank < best.rank)) best = entry;
   }
-  if (best && best.rank <= 45) return best.domain;
-  if (slugs.includes("recursion")) {
-    // Co-tag routing for `recursion` when only generic container tags or nothing else is present
-    if (slugs.includes("math")) return "math-bitwise";
-    return "trees-recursion";
-  }
+  if (best && best.rank <= 46) return best.domain;
+  if (slugs.includes("recursion")) return "trees-recursion";
   return best ? best.domain : "arrays-strings"; // Untagged fallback (51 problems)
 }
 
@@ -469,13 +472,44 @@ export function applyAttemptGraded(
   }
 }
 
+/** P2 #3: Idempotent exactly-once grading wrapper keyed by attemptId (UNIQUE(attemptId, kind) in SQLite). */
+export function applyAttemptGradedOnce(
+  state: LearnerRatingState,
+  gradedAttemptIds: Set<string>,
+  attemptId: string,
+  day: number,
+  updates: DomainFacetUpdate[],
+  options: Parameters<typeof applyAttemptGraded>[3] = {},
+): boolean {
+  if (gradedAttemptIds.has(attemptId)) return false;
+  gradedAttemptIds.add(attemptId);
+  applyAttemptGraded(state, day, updates, options);
+  return true;
+}
+
 export type GateAttemptSummary = {
   id: string;
   phase: "active" | "paused" | "review" | "learn" | "complete";
+  sealed: boolean;
   demonstration?: boolean;
-  checkInSettled: boolean;
+  hasIntake?: boolean;
+  checkInSkippedAt?: number;
+  reflectionMessageCount?: number;
   coachingDeferred?: boolean;
 };
+
+/**
+ * P1 #2: Matches lib/reflection-intake.ts (`needsReflectionIntake`) and lib/reflection-service.ts:
+ * older/restored attempts that are `complete` or already have reflection messages cannot submit
+ * intake, so they are treated as check-in settled and never trapped by the gate.
+ */
+export function isCheckInSettled(a: GateAttemptSummary): boolean {
+  if (a.demonstration || !a.sealed) return true;
+  if (a.phase === "active" || a.phase === "paused" || a.phase === "complete") return true;
+  if (a.hasIntake || a.checkInSkippedAt !== undefined) return true;
+  if ((a.reflectionMessageCount ?? 0) > 0) return true;
+  return false;
+}
 
 /** Blocks BOTH Today prescriptions (`recommend()`) and self-picked starts (`POST /api/state`). */
 export function nextAssessmentGate(attempts: GateAttemptSummary[]): {
@@ -488,7 +522,7 @@ export function nextAssessmentGate(attempts: GateAttemptSummary[]): {
   if (active) {
     return { allowed: false, reason: "active-attempt", blockingAttemptId: active.id };
   }
-  const unsettled = live.find((a) => !a.checkInSettled && a.phase !== "complete");
+  const unsettled = live.find((a) => !isCheckInSettled(a));
   if (unsettled) {
     return { allowed: false, reason: "unsettled-checkin", blockingAttemptId: unsettled.id };
   }
@@ -588,7 +622,8 @@ export function updateConceptRecord(
     prev.stabilityDays = Math.max(4, prev.stabilityDays);
     prev.lastEvaluatedDay = day;
   } else if (outcome === "lapsed") {
-    prev.stabilityDays = Math.min(10, Math.max(5, 0.25 * prev.stabilityDays));
+    // P2 #5: Bound lapse stability by previous stability (e.g. 4d -> 2d, never increases!)
+    prev.stabilityDays = Math.min(prev.stabilityDays, 10, Math.max(2, 0.25 * prev.stabilityDays));
     prev.lapses += 1;
     prev.lastEvaluatedDay = day;
   }
@@ -621,13 +656,22 @@ export function selectDirectorIntent(
   const prevDomain = state.recentDomains.at(-1) ?? null;
   const domainIndex = (d: DomainId) => DOMAINS.indexOf(d);
 
+  const passesGlobalGate = (d: DomainId) =>
+    state.globalMu >= (DOMAIN_MIN_GLOBAL_MU[d] ?? -Infinity);
   const isEligible = (d: DomainId) => {
-    if (state.globalMu < DOMAIN_ENTRY_FLOOR[d]) return false;
+    if (!passesGlobalGate(d)) return false;
     if (d === prevDomain) return false;
     const count6 = state.recentDomains.slice(-6).filter((x) => x === d).length;
     return count6 < 2;
   };
-  const eligible = DOMAINS.filter(isEligible);
+  let eligible = DOMAINS.filter(isEligible);
+  // Defense-in-depth beginner/edge-case fallback: relax 6-attempt cap first, then prevDomain if ever empty
+  if (!eligible.length) {
+    eligible = DOMAINS.filter((d) => passesGlobalGate(d) && d !== prevDomain);
+  }
+  if (!eligible.length) {
+    eligible = DOMAINS.filter(passesGlobalGate);
+  }
 
   const dueConcepts = [...state.concepts.values()]
     .filter((c) => c.state !== "probed" && isEligible(c.domain))
@@ -653,7 +697,7 @@ export function selectDirectorIntent(
     const theta =
       state.globalMu +
       (facet === "selection" ? state.domains[d].selOffset : state.domains[d].implOffset);
-    const floor = DOMAIN_ENTRY_FLOOR[d];
+    const floor = CATALOG_DIFFICULTY_FLOOR[d];
     const lo = Math.max(floor, Math.min(1800, Math.round(theta + loDelta)));
     const hi = Math.max(lo + 30, Math.min(1850, Math.round(theta + hiDelta)));
     return [lo, hi];
@@ -832,10 +876,25 @@ test("B1: overlapping Easy/Medium/Hard bands eliminate the 980-1080 dead canyon 
   );
 });
 
-test("B2 & B3: total-order 52-slug resolver fixes misroutings and 24-concept catalogue handles uncoached probes", () => {
-  assert.equal(TAG_PRIORITY_TABLE.length, 52);
+test("B2 & B3: total-order 53-slug resolver fixes misroutings and 24-concept catalogue handles uncoached probes", () => {
+  assert.equal(TAG_PRIORITY_TABLE.length, 53);
   const ranks = new Set(TAG_PRIORITY_TABLE.map((t) => t.rank));
-  assert.equal(ranks.size, 52);
+  assert.equal(ranks.size, 53);
+
+  // P2 #7: Every primary query slug resolves cleanly alone and paired with container `array`
+  for (const entry of TAG_PRIORITY_TABLE) {
+    if (!entry.queryablePrimary) continue;
+    assert.equal(
+      resolvePrimaryDomainFromSlugs([entry.slug]),
+      entry.domain,
+      `Primary slug [${entry.slug}] must resolve to ${entry.domain}`,
+    );
+    assert.equal(
+      resolvePrimaryDomainFromSlugs([entry.slug, "array"]),
+      entry.domain,
+      `Primary slug [${entry.slug}, array] must resolve to ${entry.domain}`,
+    );
+  }
 
   // Reviewer B2 cases:
   assert.equal(
@@ -975,21 +1034,97 @@ test("B4, B5, B6, B7: single base update, order-independence, Selection targetin
   assert.equal(formatComplexityStat(sBigO.complexityCalibration.time), "1 of 1 accurate, 1 unsure");
   assert.equal(formatComplexityStat(sBigO.complexityCalibration.space), "0 of 1 accurate, 1 unsure");
 
-  // Gate check: unsettled check-in blocks both prescriptions & self-picked starts; deferred coaching unblocks!
+  // Gate checks (P1 #2): unsettled vs legacy/restored/complete vs deferred
   assert.deepEqual(
-    nextAssessmentGate([{ id: "a1", phase: "review", checkInSettled: false }]),
+    nextAssessmentGate([{ id: "a1", phase: "review", sealed: true }]),
     { allowed: false, reason: "unsettled-checkin", blockingAttemptId: "a1" },
   );
+  // Legacy/restored attempt with reflection messages and no intake is settled (never unsubmittably gated!)
+  assert.equal(
+    isCheckInSettled({ id: "legacy-open", phase: "review", sealed: true, hasIntake: false, reflectionMessageCount: 2 }),
+    true,
+  );
   assert.deepEqual(
-    nextAssessmentGate([{ id: "a1", phase: "review", checkInSettled: true, coachingDeferred: true }]),
+    nextAssessmentGate([
+      { id: "legacy-complete", phase: "complete", sealed: true, hasIntake: false, reflectionMessageCount: 0 },
+      { id: "a1", phase: "review", sealed: true, hasIntake: true, coachingDeferred: true },
+    ]),
     { allowed: true },
   );
+
+  // P2 #3: Retry-safe idempotent grading applies attempt grade exactly once
+  const sOnce = createInitialState();
+  const gradedIds = new Set<string>();
+  const firstRun = applyAttemptGradedOnce(
+    sOnce,
+    gradedIds,
+    "attempt-retry-1",
+    1,
+    [{ domain: "hashing-prefix", facet: "implementation", weight: 1.0, difficulty: 920, score: 1.0 }],
+    { prescribed: true, primaryDomain: "hashing-prefix" },
+  );
+  const snapshotAfterFirst = {
+    globalMu: sOnce.globalMu,
+    globalSigma: sOnce.globalSigma,
+    implOffset: sOnce.domains["hashing-prefix"].implOffset,
+    prescribedCount: sOnce.prescribedCount,
+    recentLen: sOnce.recentDomains.length,
+  };
+  const retryRun = applyAttemptGradedOnce(
+    sOnce,
+    gradedIds,
+    "attempt-retry-1",
+    1,
+    [{ domain: "hashing-prefix", facet: "implementation", weight: 1.0, difficulty: 920, score: 1.0 }],
+    { prescribed: true, primaryDomain: "hashing-prefix" },
+  );
+  assert.equal(firstRun, true);
+  assert.equal(retryRun, false);
+  assert.equal(sOnce.globalMu, snapshotAfterFirst.globalMu);
+  assert.equal(sOnce.globalSigma, snapshotAfterFirst.globalSigma);
+  assert.equal(sOnce.domains["hashing-prefix"].implOffset, snapshotAfterFirst.implOffset);
+  assert.equal(sOnce.prescribedCount, snapshotAfterFirst.prescribedCount);
+  assert.equal(sOnce.recentDomains.length, snapshotAfterFirst.recentLen);
 
   // B4: Selection lag >= 35 triggers targetFacet="selection"
   const sLag = createInitialState();
   sLag.domains["heaps-ordered"].implOffset = 40;
   sLag.domains["heaps-ordered"].selOffset = -5;
   assert.equal(chooseTargetFacet(sLag, "heaps-ordered", "growth"), "selection");
+});
+
+test("P1 #1: weak onboarding (4 zero-score D=920 problems -> mu0=738.14) transitions cleanly into Stage 2", () => {
+  const s = createInitialState();
+  const stage1: DomainId[] = [
+    "hashing-prefix",
+    "two-pointers-window",
+    "stacks-queues-linked",
+    "binary-search",
+  ];
+  for (const [i, d] of stage1.entries()) {
+    applyAttemptGraded(
+      s,
+      i + 1,
+      [{ domain: d, facet: "implementation", weight: 1.0, difficulty: 920, score: 0.0 }],
+      { prescribed: true, primaryDomain: d },
+    );
+  }
+  assert.equal(Number(s.globalMu.toFixed(2)), 738.14);
+
+  // Stage 2: 3 consecutive Director calls at theta ~738 must never throw, skip backtracking, clamp lo=800, and rotate domains
+  const stage2: PrescriptionIntent[] = [];
+  for (let i = 0; i < 3; i++) {
+    const intent = selectDirectorIntent(s, 5 + i);
+    stage2.push(intent);
+    assert.notEqual(intent.targetDomain, "backtracking");
+    assert.equal(intent.targetDifficultyBand[0], 800);
+    assert.ok(intent.targetDifficultyBand[1] >= 830);
+    assert.notEqual(intent.targetDomain, s.recentDomains.at(-1));
+    assert.ok(s.recentDomains.slice(-6).filter((x) => x === intent.targetDomain).length < 2);
+    s.recentDomains.push(intent.targetDomain);
+    s.prescribedCount += 1;
+  }
+  assert.equal(stage2.length, 3);
 });
 
 test("§2 & §5 exact numbers: band probabilities, stability ladders, rusty threshold, 11-session replay, and 90-day convergence", () => {
@@ -1031,6 +1166,37 @@ test("§2 & §5 exact numbers: band probabilities, stability ladders, rusty thre
   updateConceptRecord(sCram, "union-find", "graphs-search", 5, "applied"); // S = 14
   updateConceptRecord(sCram, "union-find", "graphs-search", 5.1, "applied");
   assert.equal(Number(sCram.concepts.get("union-find")!.stabilityDays.toFixed(2)), 14.03);
+
+  // P2 #5: Lapses NEVER increase stability (coached 4d -> 2d; applied 14d -> 3.5d; consolidated 120d -> 10d cap)
+  const sLapse = createInitialState();
+  updateConceptRecord(sLapse, "union-find", "graphs-search", 0, "coached");
+  assert.equal(sLapse.concepts.get("union-find")!.stabilityDays, 4);
+  updateConceptRecord(sLapse, "union-find", "graphs-search", 5, "lapsed");
+  assert.equal(sLapse.concepts.get("union-find")!.stabilityDays, 2);
+  assert.equal(sLapse.concepts.get("union-find")!.lastEvaluatedDay, 5);
+  assert.equal(sLapse.concepts.get("union-find")!.lastSuccessDay, 0);
+  // Next due day from 2d is ceil((27/22)*2) = 3 days (down from 5 days at S=4d)
+  assert.equal(Math.ceil(2 * 9 * (1 / 0.88 - 1)), 3);
+
+  updateConceptRecord(sLapse, "top-k-priority-queue", "heaps-ordered", 0, "coached");
+  updateConceptRecord(sLapse, "top-k-priority-queue", "heaps-ordered", 5, "applied"); // 14d
+  updateConceptRecord(sLapse, "top-k-priority-queue", "heaps-ordered", 25, "lapsed");
+  assert.equal(sLapse.concepts.get("top-k-priority-queue")!.stabilityDays, 3.5);
+
+  const sLapseHigh = createInitialState();
+  sLapseHigh.concepts.set("tree-dfs-recursion", {
+    slug: "tree-dfs-recursion",
+    domain: "trees-recursion",
+    state: "applied",
+    stabilityDays: 120,
+    lastEvaluatedDay: 100,
+    lastSuccessDay: 100,
+    probeCount: 0,
+    reps: 5,
+    lapses: 0,
+  });
+  updateConceptRecord(sLapseHigh, "tree-dfs-recursion", "trees-recursion", 200, "lapsed");
+  assert.equal(sLapseHigh.concepts.get("tree-dfs-recursion")!.stabilityDays, 10);
 
   // 3. Rusty badge fires at exactly 45 idle days and deducts 21–30 pts on a 120-day hiatus
   const sRust = createInitialState();
@@ -1096,7 +1262,7 @@ test("§2 & §5 exact numbers: band probabilities, stability ladders, rusty thre
       updateConceptRecord(sHist, intent.targetConceptSlug, intent.targetDomain, 34 + i, "applied");
     }
   }
-  // Verify zero consecutive domain repeats and <= 2 occurrences in the 5-prescription window
+  // Verify zero consecutive domain repeats and <= 2 occurrences in any rolling 6-attempt window
   for (let i = 1; i < next5.length; i++) {
     assert.notEqual(next5[i].targetDomain, next5[i - 1].targetDomain);
   }
@@ -1122,6 +1288,11 @@ test("§2 & §5 exact numbers: band probabilities, stability ladders, rusty thre
     let selPrescriptions = 0;
     for (let d = 1; d <= 90; d++) {
       const intent = selectDirectorIntent(st, d);
+      assert.notEqual(intent.targetDomain, st.recentDomains.at(-1), `${name} day ${d}: consecutive domain repeat`);
+      assert.ok(
+        st.recentDomains.slice(-6).filter((x) => x === intent.targetDomain).length < 2,
+        `${name} day ${d}: >2 occurrences of ${intent.targetDomain} in last 6 attempts`,
+      );
       if (intent.targetFacet === "selection") selPrescriptions++;
       const midDiff = Math.round((intent.targetDifficultyBand[0] + intent.targetDifficultyBand[1]) / 2);
       const trueDom = trueBase + (intent.targetDomain === "graphs-search" ? 80 : intent.targetDomain === "dynamic-programming" ? -80 : 0);
@@ -1158,5 +1329,31 @@ test("§2 & §5 exact numbers: band probabilities, stability ladders, rusty thre
       selPrescriptions,
     };
   }
-  if (process.env.PRINT_SIM_SUMMARY) console.log(JSON.stringify(summary, null, 2));
+
+  // P2 #8: Strict assertions guarding every published §4/§5 number against silent regressions
+  assert.equal(summary.fourCleanEasiesGlobal, "1167±146");
+  assert.deepEqual(summary.replayBeforePrescriptions, {
+    global: "1088±112",
+    domains: {
+      "graphs-search": { impl: 1130, implSigma: 107, sel: 1130 },
+      "hashing-prefix": { impl: 1099, implSigma: 107, sel: 1108 },
+      "binary-search": { impl: 1125, implSigma: 106, sel: 1102 },
+      "two-pointers-window": { impl: 1100, implSigma: 108, sel: 1107 },
+      "sorting-intervals": { impl: 1097, implSigma: 107, sel: 1088 },
+      "stacks-queues-linked": { impl: 1068, implSigma: 108, sel: 1088 },
+      "heaps-ordered": { impl: 1069, implSigma: 109, sel: 1088 },
+    },
+  });
+  assert.deepEqual(summary.next5, [
+    "0:growth:stacks-queues-linked(selection)@1043-1098",
+    "1:breadth:arrays-strings(implementation)@1043-1098",
+    "2:consolidation:hashing-prefix(implementation):prefix-sum-map@1059-1104",
+    "3:consolidation:sorting-intervals(implementation):custom-comparator-intervals@1057-1102",
+    "4:momentum:graphs-search(implementation)@1025-1075",
+  ]);
+  assert.deepEqual(summary.synthetic, {
+    beginner: { global: "889±50", graphsImpl: 947, dpImpl: 875, selPrescriptions: 28 },
+    intermediate: { global: "1119±50", graphsImpl: 1150, dpImpl: 1082, selPrescriptions: 38 },
+    strong: { global: "1326±50", graphsImpl: 1320, dpImpl: 1359, selPrescriptions: 28 },
+  });
 });

@@ -1,90 +1,76 @@
-# Design Specification (v5): Hierarchical Skill Ratings, Concept Stability & Pacing Director
+# Design Specification (v6): Hierarchical Skill Ratings, Concept Stability & Pacing Director
 
 > [!NOTE]
-> **Design specification (v5 — machine-verified)** — resolves all seven blockers (`B1`–`B7`), all nine formula/prose discrepancies, and all sixteen smaller issues from the v4 review. Every equation, resolver rule, concept transition, and §5 number is implemented and asserted in [`tests/skill-ratings-sim.test.ts`](../tests/skill-ratings-sim.test.ts).
+> **Design specification (v6 — pre-build blockers cleared & machine-asserted)** — resolves all eight findings (`P1 #1–#2`, `P2 #3–#8`) from the v5 adversarial review. Every equation, resolver rule, concept transition, gate rule, and §5 number is implemented and strictly asserted in [`tests/skill-ratings-sim.test.ts`](../tests/skill-ratings-sim.test.ts).
 
 ---
 
-## Summary of Changes from v4 Review
+## Summary of Changes from v5 Review
 
-| Review Item | Resolution in v5 |
+| Review Finding | Resolution in v6 |
 | :--- | :--- |
-| **B1. Empty bands around `θ = 1000–1040` & missing empty-band rule** | Overlapped Easy `[800, 1080]`, Medium `[980, 1400]`, and Hard `[1340, 1800]` ($a = \text{acRate}/100$), placing `68%–80%` AC Mediums at `980–1072` across the former `1030–1060` gap. Lowered entry floors to `800` (`980` for `backtracking`). Added 3-step `snapCandidatePool` (`[lo, hi]` → `[lo-60, hi+60]` → nearest 3 by $|D - \text{mid}|$, scored at actual $D$), `orderBy: AC_RATE` list queries, and list-level `design` filtering. |
-| **B2. "Rarest tag wins" misroutings & 16 untiered slugs** | Replaced rarity tie-breaking with an explicit **`1..52` total priority table** (§1.2): `heap-priority-queue` (#8) and `linked-list` (#10) outrank `two-pointers` (#24); `tree`/`bst` (#12–14) outrank `bfs`/`dfs` (#19–20); `divide-and-conquer` (#45) and `recursion` (#46) sit just above generic containers (#47–52); untagged problems (`[]`) fall back to `arrays-strings`. |
-| **B3. Missing concept catalogue & infinite re-probe loop** | Restored the **24-Concept Catalogue** (§1.3) with `(order, slug, domain, searchTagSlug, minGlobalMu)` and added `state: "probed"` + `probeCount` (`max 2` uncoached probes, `14-day` cooldown). |
-| **B4. Nothing ever targets `Selection`** | Added `chooseTargetFacet` (§4.2): sets `targetFacet = "selection"` ("disguised" problem) when $\delta_{d,\text{impl}} - \delta_{d,\text{sel}} \ge 35$ or every 3rd `Growth` attempt in $d$; `Growth` ranks domains by $\min(\text{LCB}_{\text{impl}}, \text{LCB}_{\text{sel}})$. |
-| **B5. Valid alternative optimal solutions penalized** | Missed-target `Selection = 0.20` and concept `lapse` require **both** an asymptotic complexity gap **and** an already `coached`/`applied` concept in Track B (§3.2). Optimal alternative routes incur `0` penalty and `0` lapse. |
-| **B6 & floor bleed. Global base double-counted; 56% floor bleed** | `applyAttemptGraded` updates $(\mu_0, \sigma_0)$ **once per attempt** from the weighted `implementation` composite, and updates domain facets order-independently from the pre-attempt snapshot (§2.3). Lowered $\sigma_{0,\min} = 20$ vs. $\sigma_{d,\text{impl},\min} = 45$ (`16.5%` steady-state global variance share). |
-| **B7. Big-O check-in distorts domain ratings & penalizes `"unsure"`** | Removed free-text Big-O from the DSA domain rubric. Stated time and space Big-O are tracked separately in `complexityCalibration.time` and `complexityCalibration.space` (`{ accurate, inaccurate, unsure }`), displayed as raw counts alongside `unsure` (e.g. `"7 of 9 accurate, 3 unsure"` — never a bare combined percentage). |
-| **§5 & Smaller issues** | Committed [`tests/skill-ratings-sim.test.ts`](../tests/skill-ratings-sim.test.ts) and regenerated every number in §2 and §5 directly from passing assertions; closed all 16 smaller issues in §§1–4. |
+| **1. P1 — Weak onboarding locks out all 13 domains (`μ₀ = 738.14 < 800`)** | Split **Catalog Difficulty Floor** (`800` for 12 Easy domains, `980` for `backtracking`) from **Learner Eligibility (`DOMAIN_MIN_GLOBAL_MU`)**. Only `backtracking` gates on $\mu_0 \ge 980$; the 12 Easy-backed domains are **always eligible** regardless of $\mu_0$, with cooldown relaxation if ever needed and target bands clamped to `CATALOG_DIFFICULTY_FLOOR[d]`. Asserted cleanly transitioning into Stage 2 from $\mu_0 = 738.14$. |
+| **2. P1 — Gate traps legacy/restored attempts that cannot submit intake** | Defined one unified `isCheckInSettled(a)` contract matching [`lib/reflection-intake.ts`](../lib/reflection-intake.ts) and [`lib/reflection-service.ts`](../lib/reflection-service.ts): `demonstration`, `!sealed`, `phase ∈ {"active", "paused", "complete"}`, `reflection.intake`, `checkInSkippedAt !== undefined`, or `reflection.messages.length > 0` are settled. Existing/restored attempts with prior messages or `complete` phase never trap learners on an unsubmittable check-in. |
+| **3. P2 — Attribution failure/retry ambiguity** | Separated synchronous **durable settlement** (`attempt` + `rating_jobs(attemptId PRIMARY KEY, status = 'pending')` committed immediately on check-in or familiarity skip, unlocking the next problem) from asynchronous **idempotent grading** (`skill_rating_events` `UNIQUE(attemptId, kind)` for `attempt-graded`), guaranteeing retries apply the grade **exactly once**. |
+| **4. P2 — Launch request drops prescription ID/intent** | Carry `prescriptionId?: string` from `ProblemPrescription` through `Workspace.start` into `POST /api/state`, verifying the saved prescription (`id` + `slug`) and persisting `attempt.prescription = { id, intent }` on the created `Attempt`. `prescribedCount` increments iff `attempt.prescription?.intent` exists. |
+| **5. P2 — First lapse raises coached concept stability (`4d → 5d`)** | Bounded `lapsed` stability by previous stability: $S_c' = \min(S_c,\; 10,\; \max(2,\; 0.25 \cdot S_c))$. Coached `4d` drops to `2d` (next due in `3` days instead of `5d`), `14d → 3.5d`, `120d → 10d`. |
+| **6. P2 — Pre-start `"Why this problem?"` leaks Selection target** | When `prescription.intent.targetFacet === "selection"`, [`components/problem-prescription.tsx`](../components/problem-prescription.tsx) hides `p.evidence` (`skill` / `observation`) before starting (recording `selectionSpoilerRevealed: true` if explicitly expanded or if `Inspect problem selection` is opened pre-start, which sets $w_{d,\text{sel}} = 0$ on that attempt). |
+| **7. P2 — `math` missing explicit rank in resolver** | Added `{ rank: 45, slug: "math", domain: "math-bitwise" }` to the now **53-slug** total priority table (shifting `divide-and-conquer` #46, `recursion` #47, `matrix..array` #48–53) and asserted all primary query slugs alone and paired with `array`. |
+| **8. P2 — Published §5 numbers & cooldown invariants unasserted** | Replaced print-only summary output in [`tests/skill-ratings-sim.test.ts`](../tests/skill-ratings-sim.test.ts) with strict `assert.equal` / `assert.deepEqual` checks covering every §5 rating/band/prescription number and day-by-day rolling 6-attempt cooldown checks across all 90-day runs. |
 
 ---
 
-## 1. Taxonomy, Total-Order Resolver & 24-Concept Catalogue
+## 1. Taxonomy, 53-Slug Total-Order Resolver & 24-Concept Catalogue
 
 ### 1.1 Track A — 13 Rated Domains & Catalog Query Contract
 
 Schema changes required at build time:
 1. Preserve `topicTags: { name, slug }[]` and `acRate: number` (`0..100`) in [`spikes/leetcode/client.mjs`](../spikes/leetcode/client.mjs), [`lib/validation.ts`](../lib/validation.ts), and [`lib/prescription.ts`](../lib/prescription.ts).
-2. `LeetCodeClient.list` accepts optional `tag` (a **single** verified slug—never `AND`-combined) and `orderBy: "AC_RATE_DESC" | "AC_RATE_ASC"` (`DESC` when target midpoint $< 1120$, `ASC` when $\ge 1260$, plus a middle `skip` offset when $\in [1120, 1260]$) so the 30 returned candidates cluster near the target difficulty instead of the 30 oldest IDs.
-3. `search_problems` immediately filters out candidates with `isPaidOnly` (unless `isPremium`), `skippedSlugs`, and any excluded slug in `{"database", "shell", "concurrency", "interactive", "design", "data-stream"}`, and verifies `q.topicTags.some(t => t.slug === tag)` client-side. Thus `design` problems (including multi-method `systemdesign` tasks rejected at [`lib/prescription.ts:418`](../lib/prescription.ts)) never consume `inspect_problem` calls.
+2. `LeetCodeClient.list` accepts optional `tag` (a **single** verified slug—never `AND`-combined) and `orderBy: "AC_RATE_DESC" | "AC_RATE_ASC"` (`DESC` when target midpoint $< 1120$, `ASC` when $\ge 1260$, plus a middle `skip` offset when $\in [1120, 1260]$) so returned candidates cluster near the target difficulty instead of the 30 oldest IDs.
+3. `search_problems` immediately filters out candidates with `isPaidOnly` (unless `isPremium`), `skippedSlugs`, and any excluded slug in `{"database", "shell", "concurrency", "interactive", "design", "data-stream"}`, and verifies `q.topicTags.some(t => t.slug === tag)` client-side.
 
-| Canonical Order | Domain ID | Display Name | Entry Floor ($\mu_0$) | Primary Query Slugs (queried one at a time) |
-| :---: | :--- | :--- | :---: | :--- |
-| 1 | `arrays-strings` | Arrays, Strings & Simulation | `800` | `array`, `string`, `matrix`, `simulation` |
-| 2 | `hashing-prefix` | Hashing & Prefix State | `800` | `hash-table`, `prefix-sum`, `counting` |
-| 3 | `two-pointers-window` | Two Pointers & Sliding Window | `800` | `two-pointers`, `sliding-window` |
-| 4 | `sorting-intervals` | Sorting & Intervals | `800` | `sorting` |
-| 5 | `stacks-queues-linked` | Stacks, Queues & Linked Lists | `800` | `stack`, `queue`, `monotonic-stack`, `linked-list` |
-| 6 | `binary-search` | Binary Search | `800` | `binary-search` |
-| 7 | `heaps-ordered` | Heaps & Ordered Collections | `800` | `heap-priority-queue`, `ordered-set` |
-| 8 | `trees-recursion` | Trees & Divide-and-Conquer | `800` | `tree`, `binary-tree`, `binary-search-tree`, `trie` |
-| 9 | `graphs-search` | Graphs & Grid Search | `800` | `depth-first-search`, `breadth-first-search`, `graph`, `topological-sort`, `union-find` |
-| 10 | `backtracking` | Backtracking | **`980`** | `backtracking` |
-| 11 | `dynamic-programming` | Dynamic Programming | `800` | `dynamic-programming` |
-| 12 | `greedy` | Greedy | `800` | `greedy` |
-| 13 | `math-bitwise` | Math & Bit Manipulation | `800` | `math`, `bit-manipulation`, `number-theory` |
+| Canonical Order | Domain ID | Display Name | Catalog Difficulty Floor | Min $\mu_0$ Gate | Primary Query Slugs (one at a time) |
+| :---: | :--- | :--- | :---: | :---: | :--- |
+| 1 | `arrays-strings` | Arrays, Strings & Simulation | `800` | None *(always eligible)* | `array`, `string`, `matrix`, `simulation` |
+| 2 | `hashing-prefix` | Hashing & Prefix State | `800` | None | `hash-table`, `prefix-sum`, `counting` |
+| 3 | `two-pointers-window` | Two Pointers & Sliding Window | `800` | None | `two-pointers`, `sliding-window` |
+| 4 | `sorting-intervals` | Sorting & Intervals | `800` | None | `sorting` |
+| 5 | `stacks-queues-linked` | Stacks, Queues & Linked Lists | `800` | None | `stack`, `queue`, `monotonic-stack`, `linked-list` |
+| 6 | `binary-search` | Binary Search | `800` | None | `binary-search` |
+| 7 | `heaps-ordered` | Heaps & Ordered Collections | `800` | None | `heap-priority-queue`, `ordered-set` |
+| 8 | `trees-recursion` | Trees & Divide-and-Conquer | `800` | None | `tree`, `binary-tree`, `binary-search-tree`, `trie` |
+| 9 | `graphs-search` | Graphs & Grid Search | `800` | None | `depth-first-search`, `breadth-first-search`, `graph`, `topological-sort`, `union-find` |
+| 10 | `backtracking` | Backtracking | `980` | **`980`** *(Medium-entry)* | `backtracking` |
+| 11 | `dynamic-programming` | Dynamic Programming | `800` | None | `dynamic-programming` |
+| 12 | `greedy` | Greedy | `800` | None | `greedy` |
+| 13 | `math-bitwise` | Math & Bit Manipulation | `800` | None | `math`, `bit-manipulation`, `number-theory` |
 
-### 1.2 Explicit `1..52` Tag Priority Resolver (Pre-Attempt Classification)
+### 1.2 Explicit `1..53` Tag Priority Resolver (Pre-Attempt Classification)
 
-Every mapped LeetCode slug has a unique priority rank (`1` = highest priority, no catalog-rarity heuristic):
+Every mapped LeetCode slug has a unique priority rank (`1` = highest priority):
 
-1. `trie` → `trees-recursion`
-2. `union-find` → `graphs-search`
-3. `topological-sort` → `graphs-search`
-4. `shortest-path` → `graphs-search`
-5. `minimum-spanning-tree` → `graphs-search`
-6. `monotonic-stack` → `stacks-queues-linked`
-7. `monotonic-queue` → `stacks-queues-linked`
-8. `heap-priority-queue` → `heaps-ordered` *(outranks `linked-list` & `divide-and-conquer`: routes Merge k Sorted Lists, Kth Largest, Top K Frequent)*
-9. `ordered-set` → `heaps-ordered`
-10. `linked-list` → `stacks-queues-linked` *(outranks `two-pointers` & `recursion`: routes Linked List Cycle, Remove Nth Node, Add Two Numbers)*
-11. `doubly-linked-list` → `stacks-queues-linked`
-12. `binary-search-tree` → `trees-recursion`
-13. `binary-tree` → `trees-recursion`
-14. `tree` → `trees-recursion` *(outranks `bfs`/`dfs`/`dp`/`divide-and-conquer`)*
-15. `backtracking` → `backtracking`
-16. `sliding-window` → `two-pointers-window`
-17. `binary-search` → `binary-search` *(outranks `divide-and-conquer`: routes Median of Two Sorted Arrays)*
-18. `graph` → `graphs-search`
-19. `breadth-first-search` → `graphs-search`
-20. `depth-first-search` → `graphs-search`
-21. `dynamic-programming` → `dynamic-programming` *(outranks `divide-and-conquer`: routes Maximum Subarray)*
-22. `memoization` → `dynamic-programming`
-23. `greedy` → `greedy`
-24. `two-pointers` → `two-pointers-window`
-25. `stack` → `stacks-queues-linked`
-26. `queue` → `stacks-queues-linked`
-27. `prefix-sum` → `hashing-prefix`
-28–33. `quickselect` (#28), `merge-sort` (#29), `bucket-sort` (#30), `counting-sort` (#31), `radix-sort` (#32), `sorting` (#33) → `sorting-intervals`
-34–36. `hash-table` (#34), `hash-function` (#35), `counting` (#36) → `hashing-prefix`
-37–38. `bitmask` (#37), `bit-manipulation` (#38) → `math-bitwise`
-39–44. `number-theory` (#39), `combinatorics` (#40), `geometry` (#41), `game-theory` (#42), `randomized` (#43), `brainteaser` (#44) → `math-bitwise`
-45. `divide-and-conquer` → `trees-recursion` *(demoted below all specific structures/paradigms)*
-46. `recursion` → routed to `math-bitwise` if co-tagged `math` (e.g. *Pow(x, n)*) when no rank `1..45` tag matched, else `trees-recursion`
-47–52. `matrix` (#47), `simulation` (#48), `enumeration` (#49), `iterator` (#50), `string` (#51), `array` (#52) → `arrays-strings`
+1–5. `trie` (#1 → `trees-recursion`), `union-find` (#2), `topological-sort` (#3), `shortest-path` (#4), `minimum-spanning-tree` (#5 → `graphs-search`)
+6–7. `monotonic-stack` (#6), `monotonic-queue` (#7 → `stacks-queues-linked`)
+8–9. `heap-priority-queue` (#8), `ordered-set` (#9 → `heaps-ordered`)
+10–11. `linked-list` (#10), `doubly-linked-list` (#11 → `stacks-queues-linked`)
+12–14. `binary-search-tree` (#12), `binary-tree` (#13), `tree` (#14 → `trees-recursion`)
+15. `backtracking` (#15 → `backtracking`)
+16. `sliding-window` (#16 → `two-pointers-window`)
+17. `binary-search` (#17 → `binary-search`)
+18–20. `graph` (#18), `breadth-first-search` (#19), `depth-first-search` (#20 → `graphs-search`)
+21–22. `dynamic-programming` (#21), `memoization` (#22 → `dynamic-programming`)
+23. `greedy` (#23 → `greedy`)
+24. `two-pointers` (#24 → `two-pointers-window`)
+25–26. `stack` (#25), `queue` (#26 → `stacks-queues-linked`)
+27. `prefix-sum` (#27 → `hashing-prefix`)
+28–33. `quickselect` (#28), `merge-sort` (#29), `bucket-sort` (#30), `counting-sort` (#31), `radix-sort` (#32), `sorting` (#33 → `sorting-intervals`)
+34–36. `hash-table` (#34), `hash-function` (#35), `counting` (#36 → `hashing-prefix`)
+37–45. `bitmask` (#37), `bit-manipulation` (#38), `number-theory` (#39), `combinatorics` (#40), `geometry` (#41), `game-theory` (#42), `randomized` (#43), `brainteaser` (#44), **`math` (#45)** → `math-bitwise`
+46. `divide-and-conquer` (#46 → `trees-recursion`)
+47. `recursion` (#47 → `trees-recursion` fallback when no rank `1..46` tag matches)
+48–53. `matrix` (#48), `simulation` (#49), `enumeration` (#50), `iterator` (#51), `string` (#52), `array` (#53) → `arrays-strings`
 
-**Untagged fallback:** The 51 catalog problems with `topicTags = []` resolve to `arrays-strings` if self-picked (and never match tag-filtered Director queries). Strongly connected / Eulerian / biconnected / sweep-line / string-matching / rolling-hash / suffix-array / reservoir-sampling / rejection-sampling / probability-and-statistics (combined `<120` niche problems) are intentionally unmapped in v5; problems carrying only niche + container tags resolve via their container tag during pre-filtering and via actual code during post-check-in attribution.
+All primary query slugs (including `["math"]` and `["math", "array"]`) resolve cleanly to their assigned domain.
 
 ### 1.3 Track B — Canonical 24-Concept Catalogue
 
@@ -137,7 +123,7 @@ type ConceptRecord = {
 ### 2.1 State Parameters
 - **Global Base:** $\mu_0$ (init `1000`), $\sigma_0 \in [20, 220]$ (init `220`).
 - **Domain Facets ($d \in \{1..13\}, f \in \{\text{impl}, \text{sel}\}$):** $\delta_{d,f}$ (init `0`), $\sigma_{d,\text{impl}} \in [45, 150]$ (init `110`), $\sigma_{d,\text{sel}} \in [55, 150]$ (init `110`), `freshSigma` (init `110`), `lastUpdatedAt`, `implAttempts`.
-- **Steady-State Global Bleed Guard:** At the $\sigma$ floors ($\sigma_0 = 20, \sigma_{d,\text{impl}} = 45$), the global variance share is $\frac{20^2}{20^2 + 45^2} = \mathbf{16.5\%}$ (`83.5%` domain-local), preventing isolated domain failures from dragging down unrelated domains.
+- **Steady-State Global Bleed Guard:** At the $\sigma$ floors ($\sigma_0 = 20, \sigma_{d,\text{impl}} = 45$), the global variance share is $\frac{20^2}{20^2 + 45^2} = \mathbf{16.5\%}$ (`83.5%` domain-local).
 
 ### 2.2 Overlapping Difficulty Mapping ($D$), Empty-Band Snap & Expected Score ($E$)
 
@@ -145,133 +131,100 @@ type ConceptRecord = {
    - **Easy:** $D_{\text{base}} = 800 + 280 \cdot \text{clamp}_{[0,1]}\!\left(\frac{0.85 - a}{0.55}\right) \in [800,\; 1080]$
    - **Medium:** $D_{\text{base}} = 980 + 420 \cdot \text{clamp}_{[0,1]}\!\left(\frac{0.80 - a}{0.55}\right) \in [980,\; 1400]$
    - **Hard:** $D_{\text{base}} = 1340 + 460 \cdot \text{clamp}_{[0,1]}\!\left(\frac{0.70 - a}{0.50}\right) \in [1340,\; 1800]$
-   - Final $D = \text{clamp}_{[800, 1850]}(\text{round}(D_{\text{base}} + \Delta D))$. Easy and Medium overlap across `[980, 1080]`; Medium and Hard overlap across `[1340, 1400]`.
-2. **Empty-Band Snap Rule (`snapCandidatePool`):**
-   Given target band $[L, U]$ with midpoint $M = \frac{L+U}{2}$:
-   - Step 1: Return candidates with $D_{\text{base}} \in [L, U]$ if non-empty.
-   - Step 2: Otherwise widen to $[L - 60, U + 60]$ if non-empty.
-   - Step 3: Otherwise return the 3 candidates minimizing $|D_{\text{base}} - M|$. (If the entire domain returns 0 available candidates, advance to the next eligible domain.) Scoring always uses the chosen problem's actual $D$, never $M$.
-3. **Expected Score ($L = 320, q = \frac{\ln 10}{320}, \sigma_p = 55, g(\sigma_p) = (1 + 3q^2\sigma_p^2/\pi^2)^{-1/2} \approx 0.9770$):**
+   - Final $D = \text{clamp}_{[800, 1850]}(\text{round}(D_{\text{base}} + \Delta D))$.
+2. **Empty-Band Snap Rule (`snapCandidatePool`):** `[L, U]` → `[L - 60, U + 60]` → nearest 3 candidates by $|D_{\text{base}} - \text{mid}|$ (or next eligible domain if 0 candidates). Grading always uses chosen $D$.
+3. **Expected Score ($L = 320, q = \frac{\ln 10}{320}, \sigma_p = 55, g(\sigma_p) \approx 0.9770$):**
    $$E(\theta, D) = \frac{1}{1 + 10^{-g(\sigma_p)(\theta - D)/320}}$$
-   **Exact Target Bands & Expected Scores:**
-   - **Momentum (`[θ - 105, θ - 55]`):** $E \in [0.60,\; 0.68]$
-   - **Growth & Breadth (`[θ - 45, θ + 10]`):** $E \in [0.48,\; 0.58]$
-   - **Concept Probe (`[θ - 55, θ - 15]`):** $E \in [0.53,\; 0.60]$
-   - **Consolidation (`[θ - 40, θ + 5]`):** $E \in [0.49,\; 0.57]$
-   - **Stretch (`[θ + 10, θ + 65]`):** $E \in [0.39,\; 0.48]$
+   - **Momentum (`[θ - 105, θ - 55]`):** $E \in [0.60,\; 0.68]$ · **Growth & Breadth (`[θ - 45, θ + 10]`):** $E \in [0.48,\; 0.58]$ · **Concept Probe (`[θ - 55, θ - 15]`):** $E \in [0.53,\; 0.60]$ · **Consolidation (`[θ - 40, θ + 5]`):** $E \in [0.49,\; 0.57]$ · **Stretch (`[θ + 10, θ + 65]`):** $E \in [0.39,\; 0.48]$.
 
 ### 2.3 Mutually Exclusive Rubric ($S \in [0, 1]$) & Single-Base Update Step
 
-Evaluated **top-to-bottom (first match wins, never stacked)** per exercised domain ($\sum_d w_{d,\text{impl}} = 1$; $w_{d,\text{sel}} = 0$ on signature-forced inputs like `ListNode`/`TreeNode` unless a non-obvious sub-pattern was required; Java API reference lookups via `Java help` carry no penalty):
+Evaluated **top-to-bottom (first match wins)** per exercised domain ($\sum_d w_{d,\text{impl}} = 1$; $w_{d,\text{sel}} = 0$ on signature-forced inputs or if `selectionSpoilerRevealed === true`; Java API `Java help` carries no penalty):
 
 | Precedence | Mutually Exclusive Attempt Outcome | $S_{d,\text{impl}}$ | $S_{d,\text{sel}}$ |
 | :---: | :--- | :---: | :---: |
-| 1 | Recorded outside solution help during active solving (accepted or not) | `0.35` *(if accepted, else `0.15`)* | `0.30` *(if accepted, else `0.15`)* |
+| 1 | Recorded outside solution help during active solving | `0.35` *(accepted)* / `0.15` | `0.30` *(accepted)* / `0.15` |
 | 2 | Accepted in timebox, optimal complexity class, $\le 2$ wrong-answer submits | `1.00` | `1.00` *(if non-obvious)* |
 | 3 | Accepted in timebox, optimal complexity class, $\ge 3$ wrong-answer submits or minor constant/pass overhead | `0.80` | `0.90` |
-| 4 | Accepted in timebox via suboptimal complexity class (e.g. $O(n^2)$ where $O(n)$ applies) | `0.65` *(used domain)* | `0.50` *(used domain)*; `0.20` *(missed domain iff §3.2 holds)* |
-| 5 | Unaccepted at deadline, structurally sound core invariant with isolated boundary/syntax bug | `0.40` | `0.75` |
+| 4 | Accepted in timebox via suboptimal complexity class | `0.65` *(used)* | `0.50` *(used)*; `0.20` *(missed iff §3.2 holds)* |
+| 5 | Unaccepted at deadline, sound core invariant with isolated boundary/syntax bug | `0.40` | `0.75` |
 | 6 | Unaccepted at deadline, partial/incomplete mechanics | `0.15` | `0.35` |
 | 7 | No viable approach or fundamental invariant contradiction | `0.00` | `0.00` |
 
 **Familiarity Multiplier ($m_{\text{fam}}$, applied when $S > E$, else `1.0`):** `new = 1.0`, `revisit = 0.65`, `solved = 0.25`.
 
 **Simultaneous Order-Independent Update (`applyAttemptGraded`):**
-1. **Idle $\sigma$-Drift ($c_{\text{drift}} = 7.0\;\text{pts}/\sqrt{\text{day}}$, 21-day grace window):**
-   $$\sigma'(\Delta t) = \min\!\left(\sigma_{\max},\; \sqrt{\sigma^2 + 49 \cdot \max(0,\; \Delta t - 21)}\right)$$
-   Apply once to $\sigma_0$ ($\sigma_{\max}=220$) and touched domains ($\sigma_{\max}=150$), then snapshot $(\mu_0^{\text{pre}}, \sigma_0^{\text{pre}}, \delta_{d,f}^{\text{pre}}, \sigma_{d,f}^{\text{pre}})$.
+1. **Idle $\sigma$-Drift ($c_{\text{drift}} = 7.0\;\text{pts}/\sqrt{\text{day}}$, 21-day grace window):** $\sigma'(\Delta t) = \min(\sigma_{\max}, \sqrt{\sigma^2 + 49 \cdot \max(0, \Delta t - 21)})$, then snapshot pre-attempt state.
 2. **Single Global Base Update (from `implementation` updates only):**
-   Normalize $\hat{w}_d = \frac{w_{d,\text{impl}}}{\sum_k w_{k,\text{impl}}}$, $\tilde{w}_d = \hat{w}_d m_{\text{fam},d}$, $E_d = E(\mu_0^{\text{pre}} + \delta_{d,\text{impl}}^{\text{pre}}, D)$, $R_{\text{tot}} = \sum_d \tilde{w}_d(S_{d,\text{impl}} - E_d)$, $I_{\text{tot}} = \sum_d \tilde{w}_d q^2 g(\sigma_p)^2 E_d(1 - E_d)$, $\bar{\sigma}_{\text{dom}}^2 = \sum_d \hat{w}_d (\sigma_{d,\text{impl}}^{\text{pre}})^2$, $V_0 = (\sigma_0^{\text{pre}})^2 + \bar{\sigma}_{\text{dom}}^2$, and $\alpha_0 = \frac{(\sigma_0^{\text{pre}})^2}{V_0}$:
+   Normalize $\hat{w}_d$, $\tilde{w}_d = \hat{w}_d m_{\text{fam},d}$, $E_d = E(\mu_0^{\text{pre}} + \delta_{d,\text{impl}}^{\text{pre}}, D)$, $R_{\text{tot}} = \sum_d \tilde{w}_d(S_{d,\text{impl}} - E_d)$, $I_{\text{tot}} = \sum_d \tilde{w}_d q^2 g(\sigma_p)^2 E_d(1 - E_d)$, $\bar{\sigma}_{\text{dom}}^2 = \sum_d \hat{w}_d (\sigma_{d,\text{impl}}^{\text{pre}})^2$, $V_0 = (\sigma_0^{\text{pre}})^2 + \bar{\sigma}_{\text{dom}}^2$, $\alpha_0 = \frac{(\sigma_0^{\text{pre}})^2}{V_0}$:
    $$\mu_0 \leftarrow \mu_0^{\text{pre}} + \alpha_0 \frac{q g(\sigma_p) R_{\text{tot}}}{V_0^{-1} + I_{\text{tot}}}, \qquad \sigma_0 \leftarrow \max\!\left(20,\; \left((\sigma_0^{\text{pre}})^{-2} + \alpha_0 I_{\text{tot}}\right)^{-1/2}\right)$$
-   *(Four clean `D = 920` Easies from initialization move $(\mu_0, \sigma_0)$ from `1000 ± 220` to **`1167 ± 146`**, never double-counting `Selection`.)*
-3. **Independent Facet Offset Updates (from pre-attempt snapshot, order-independent):**
-   For each active $(d, f)$ with $\theta^{\text{pre}} = \mu_0^{\text{pre}} + \delta_{d,f}^{\text{pre}}$, $\tilde{w} = w_{d,f} m_{\text{fam}}$, $V = (\sigma_0^{\text{pre}})^2 + (\sigma_{d,f}^{\text{pre}})^2$, $\alpha_d = \frac{(\sigma_{d,f}^{\text{pre}})^2}{V}$, and $I = \tilde{w} q^2 g(\sigma_p)^2 E(1 - E)$:
-   $$\delta_{d,f} \leftarrow \delta_{d,f}^{\text{pre}} + \alpha_d \frac{q g(\sigma_p) \tilde{w}(S_{d,f} - E)}{V^{-1} + I}, \qquad \sigma_{d,f} \leftarrow \max\!\left(\sigma_{\min},\; \left((\sigma_{d,f}^{\text{pre}})^{-2} + \alpha_d I\right)^{-1/2}\right), \qquad \sigma_{d,f,\text{fresh}} \leftarrow \sigma_{d,f}$$
+3. **Independent Facet Offset Updates (from pre-attempt snapshot, order-independent):** Same variance-share step for $\delta_{d,f}$ with $\alpha_d = \frac{(\sigma_{d,f}^{\text{pre}})^2}{V}$ and $\sigma_{d,f,\text{fresh}} \leftarrow \sigma_{d,f}$.
 
 ### 2.4 Break / Rust Display & Concept Stability Ladder
 
-1. **Rusty Badge & Read-Only Display Rating:**
-   - **Rusty badge trigger:** Fires on any practiced domain (`lastUpdatedAt !== null`) at **$\Delta t \ge 45$ idle calendar days** (independent of $\sigma_{\text{fresh}}$).
-   - **Display formula:** $\theta_{\text{display}} = \theta_{d,f} - 0.85 \cdot \max(0,\; \sigma'(\Delta t) - \sigma_{d,f,\text{fresh}})$. On a 120-day break from $\sigma_{\text{fresh}} = 65$, this deducts **`26` points** (strictly downward even when $\theta < 1000$; expected score $E$ always uses latent $\theta_{d,f}$).
+1. **Rusty Badge & Display Rating:** Practiced domain shows **Rusty** at $\Delta t \ge 45$ idle calendar days; display deducts $0.85 \cdot \max(0, \sigma'(\Delta t) - \sigma_{d,f,\text{fresh}})$ (`26` pts after 120 idle days from $\sigma_{\text{fresh}} = 65$; $E$ always uses latent $\theta_{d,f}$).
 2. **Track B Concept Stability (`lastEvaluatedAt` governs $\Delta t$):**
    $$R_c(\Delta t, S_c) = \left(1 + \frac{\Delta t}{9 \cdot S_c}\right)^{-1}$$
    - `probed-uncoached`: `state = "probed"`, $S_c = 0$, `probeCount += 1`, `lastEvaluatedAt = now`.
    - First `coached`: `state = "coached"`, $S_c = 4\text{d}$, `lastEvaluatedAt = lastSuccessAt = now`.
    - First `applied`: `state = "applied"`, $S_c = 14\text{d}$ if previously `coached` with $\Delta t \ge 2\text{d}$ else $12\text{d}$, `reps = 1`, `lastEvaluatedAt = lastSuccessAt = now`.
-   - Subsequent `applied` (`reps ≥ 1` while `applied`):
-     $$S_c' = \min\!\left(730,\; S_c \cdot \left(1 + 2.2 \cdot (1 - R_c(\Delta t, S_c) + 0.15) \cdot \min\!\left(1.5,\; \frac{\Delta t}{S_c}\right)\right)\right)$$
-     - **Same-day repeat ($\Delta t = 0.1\text{d}$ from $14\text{d}$):** **`14.00 → 14.03 days`**.
-     - **Ladder at exact continuous due threshold $R_c = 0.88$ ($\Delta t = \frac{27}{22} S_c$):** **`4 → 14 → 24 → 42 → 72 → 125 days`**.
-     - **Ladder on first whole calendar day $R_c \le 0.88$ ($\Delta t = \lceil \frac{27}{22} S_c \rceil$):** **`4 → 14 → 25 → 43 → 76 → 131 days`**.
-   - `lapsed`: $S_c' = \min(10, \max(5, 0.25 \cdot S_c))$, `lapses += 1`, `lastEvaluatedAt = now` (`lastSuccessAt` unchanged).
+   - Subsequent `applied`: $S_c' = \min(730, S_c \cdot (1 + 2.2 \cdot (1 - R_c + 0.15) \cdot \min(1.5, \Delta t / S_c)))$:
+     - Same-day cram ($\Delta t = 0.1\text{d}$ from `14d`): **`14.00 → 14.03 days`**.
+     - Exact continuous due threshold $R_c = 0.88$: **`4 → 14 → 24 → 42 → 72 → 125 days`**.
+     - Whole calendar days $R_c \le 0.88$: **`4 → 14 → 25 → 43 → 76 → 131 days`**.
+   - `lapsed`: **$S_c' = \min(S_c,\; 10,\; \max(2,\; 0.25 \cdot S_c))$**, `lapses += 1`, `lastEvaluatedAt = now` (`lastSuccessAt` unchanged). Stability strictly never rises on a lapse: **coached `4d → 2d`** (next due in `3` days), **`14d → 3.5d`**, **`120d → 10d`**.
 
 ---
 
-## 3. Check-In Lifecycle, Alternative-Route Guard, Big-O Calibration & Non-Punitive Rescue
+## 3. Check-In Gate, Durable Settlement, Alternative-Route Guard & Big-O Stats
 
-### 3.1 Next-Problem Check-In Gate & Familiarity-Tap Skip (No Auto-Settle Timer)
-- **Intentional UI change:** While `intakeActive` is true, the toolbar `"Skip reflection"` button ([`components/reflection-workspace.tsx:320-337`](../components/reflection-workspace.tsx)) is hidden so completions flow through the check-in surface.
-- **Full check-in (3 fields, 3 exit actions):** Completing **Familiarity** (`New to me · Seen before · Solved before`, no default preselected), **Runtime complexity**, and **Auxiliary space complexity** enables **Continue to coaching**, **Come back to coaching later** (`defer`), and **Submit & skip coaching** (`skip-confident`). **All three actions trigger `attempt-attribution` identically**, writing an immutable `attempt-graded` event (containing the full structured LLM attribution output so replay/restore is 100% deterministic without LLM calls).
-- **Explicit "Skip check-in" action (1 familiarity tap, still rates):** A learner who wants to skip typing runtime/space complexity may choose **Skip check-in**, which requires **only the single familiarity tap** (`New to me · Seen before · Solved before`, no default preselected so the `1.0×` `"new"` multiplier cannot be claimed passively), records both runtime and space complexity as `"unsure"`, runs `attempt-attribution` (`attempt-graded`), and unlocks the next problem.
-- **Hard gate across both prescriptions and self-picked catalog starts (no 24-hour auto-settle):** There is no timer-based auto-settlement and no `"abandoned"` state. Any sealed non-demonstration attempt without a settled check-in blocks starting a new assessment in **both**:
-  1. `recommend()` ([`lib/recommendation.ts`](../lib/recommendation.ts)), which blocks `Today` prescriptions and shows a **“Finish your check-in”** prompt; and
-  2. `POST /api/state` ([`app/api/state/route.ts:73`](../app/api/state/route.ts), which currently checks only `active | paused` and does *not* call `recommend()`), so self-picked problems from **Problem library** are gated identically.
-  *(Attempts whose check-in was submitted with `"Come back to coaching later"` already have a settled check-in, so they sit in the non-blocking **Pending Reflections** shelf without gating `recommend()` or `POST /api/state`.)*
-- If the learner later changes `exposure` (`setExposure`) or excludes/corrects an observation in **Coach Memory**, the store appends a deterministic `compensating-recompute` event and replays the pure TypeScript math over active events.
+### 3.1 Next-Problem Check-In Gate (`isCheckInSettled`) & Durable Settlement
+- **Unified Settled Contract (`isCheckInSettled(a)`):** Used identically by UI, `recommend()`, and `POST /api/state`: returns `true` iff `a.demonstration`, `!a.sealed`, `a.phase ∈ {"active", "paused", "complete"}`, `a.reflection?.intake`, `a.reflection?.checkInSkippedAt !== undefined`, or `(a.reflection?.messages?.length ?? 0) > 0`.
+  - Consequently, existing/restored legacy attempts with prior reflection messages (even without `intake`) or `phase === "complete"` are **already settled** and never trap a learner behind a check-in they cannot submit.
+- **Hard Gate Across All New Starts:** Any sealed non-demonstration attempt in `review`/`learn` with `!isCheckInSettled(a)` blocks starting a new assessment in **both** `recommend()` (shows **“Finish your check-in”**) and `POST /api/state` (blocks self-picked catalog starts). Deferred coaching (`coachingDeferred: true` after check-in) unblocks both.
+- **Check-In & Familiarity-Tap Skip:** Completing the 3 fields offers **Continue to coaching**, **Come back to coaching later**, and **Submit & skip coaching**. Alternatively, **Skip check-in** requires only **1 tap on Familiarity** (`New to me · Seen before · Solved before`, no default preselected), sets time and space Big-O to `"unsure"`, marks `checkInSkippedAt = now`, and settles.
+- **Durable Settlement & Exactly-Once Grading (`rating_jobs` + `skill_rating_events`):**
+  - Saving either the 3-field check-in or **Skip check-in** commits synchronously in SQLite (`attempt` + `rating_jobs(attemptId PRIMARY KEY, status = 'pending')`), **immediately settling the check-in and unlocking the next problem** regardless of network/LLM latency.
+  - Background `attempt-attribution` writes an immutable `attempt-graded` row to `skill_rating_events` enforced by **`UNIQUE(attemptId, kind)`** and marks `rating_jobs.status = 'complete'`. If the LLM call fails or times out, the learner still proceeds; a background retry (or clicking `"Retry rating update"`) grades the attempt **exactly once**. Pending/failed jobs still apply deterministic tag cooldowns in `recentDomains` until attribution lands.
+  - Later `setExposure` updates or Coach Memory exclusions/corrections append a deterministic `compensating-recompute` event with zero extra LLM calls.
 
 ### 3.2 Alternative-Route Guard (`evaluateMissedTargetSelection`)
-An unused domain $d$ / concept $c$ receives $S_{d,\text{sel}} = 0.20$ and a concept `lapse` **if and only if both hold**:
-1. The learner's solution had strictly worse asymptotic complexity than optimal (or failed via TLE/MLE where $c$ passes), **AND**
-2. Concept $c$ in domain $d$ already has `state ∈ {"coached", "applied"}` in Track B.
+An unused domain $d$ / concept $c$ receives $S_{d,\text{sel}} = 0.20$ and a concept `lapse` **iff both**: (1) the learner's solution had strictly worse asymptotic complexity than optimal (or timed out where $c$ passes), **AND** (2) $c$ already has `state ∈ {"coached", "applied"}`. Valid optimal alternatives incur `0` Selection penalty and `0` lapse.
 
-If the learner solved the problem **optimally via a different valid route**, `Selection` on the unused target domain is **not updated (`w = 0`)** and no `lapse` is recorded (an uncoached probe simply increments `probeCount`).
-
-### 3.3 Separate Time & Space Big-O Calibration Signals & Strictly Non-Punitive Coaching (`ΔS ≥ 0`)
-- Runtime and auxiliary-space check-in answers are tracked **independently** in `complexityCalibration`:
-  ```ts
-  complexityCalibration: {
-    time: { accurate: number; inaccurate: number; unsure: number };
-    space: { accurate: number; inaccurate: number; unsure: number };
-  }
-  ```
-  Neither field ever enters $S_{d,\text{impl}}$ or $S_{d,\text{sel}}$. On **Your progress**, each dimension renders as **raw counts alongside the `unsure` count**—e.g. `Runtime: 7 of 9 accurate, 3 unsure` and `Space: 5 of 8 accurate, 4 unsure`—never as a bare percentage (which misleads at small sample sizes or when a user frequently selects `"unsure"`), and never merged into a single combined number.
-- Conversational reflection never lowers `attempt-graded` scores; it may only append a `reflection-rescue` event ($\Delta S \in [0, +0.25]$ on **unaccepted** Tier 5/6 near-misses when chat confirms a sound invariant, never on already-accepted solves) and record `coached` Track B concepts.
+### 3.3 Separate Time & Space Big-O Calibration & Non-Punitive Rescue (`ΔS ≥ 0`)
+- Runtime and space check-in answers are stored independently in `complexityCalibration.time` and `complexityCalibration.space` (`{ accurate, inaccurate, unsure }`) and rendered as **`"${accurate} of ${accurate + inaccurate} accurate, ${unsure} unsure"`** (never coupled into domain ratings).
+- Conversational reflection never lowers `attempt-graded` scores; it may only append `reflection-rescue` ($\Delta S \in [0, +0.25]$ on **unaccepted** Tier 5/6 near-misses) and `coached` Track B concepts.
 
 ---
 
-## 4. Onboarding & Deterministic Pacing Director
+## 4. Onboarding, Prescription Provenance, Spoiler Guard & Pacing Director
 
-### 4.1 Onboarding
-- **Stage 1 (4 fixed curated Easy problems, 10–15m):** Covers `hashing-prefix`, `two-pointers-window`, `stacks-queues-linked`, and `binary-search`. Four clean `D = 920` solves move $(\mu_0, \sigma_0)$ to **`1167 ± 146`**.
-- **Stage 2 (3 dynamic Director prescriptions):** Uses §4.2 directly (where overlapping `[980, 1080]` Mediums/Easies + `snapCandidatePool` guarantee valid candidates in every eligible domain).
+### 4.1 Launch Provenance & Pre-Start Spoiler Guard
+- **Prescription Provenance (`P2 #4`):** [`components/problem-prescription.tsx`](../components/problem-prescription.tsx) passes `prescriptionId` through `Workspace.start` ([`components/workspace.tsx:753`](../components/workspace.tsx)) into `POST /api/state`. When `prescriptionId` matches an active saved prescription (`slug` match, `!demonstration`), the server persists `attempt.prescription = { id, intent, selectionSpoilerRevealed }` on the created `Attempt`. `prescribedCount` increments **iff** `attempt.prescription?.intent` exists; self-picked library launches omit `attempt.prescription`.
+- **Pre-Start Spoiler Guard (`P2 #6`):** When `prescription.intent.targetFacet === "selection"`, [`components/problem-prescription.tsx:205-241`](../components/problem-prescription.tsx) suppresses `p.evidence` (`skill`, `observation`, `support`) under `"Why this problem?"` pre-start, showing spoiler-free metadata plus an opt-in *"Reveal evidence anyway (disables Pattern Selection scoring)"* button. Clicking it (or opening `Inspect problem selection` pre-start) marks `selectionSpoilerRevealed: true`, setting $w_{d,\text{sel}} = 0$ on that attempt. Full evidence renders automatically once the attempt seals.
 
-### 4.2 Pacing Director (`selectDirectorIntent`)
-- **Counters & Cooldowns:** `prescribedCount` increments **only** on attempts launched from a Director `Prescription` (self-picked attempts update ratings and `recentDomains` cooldowns without advancing `prescribedCount` or consuming `Consolidation` slots). Domain $d$ is eligible iff $\mu_0 \ge \text{DOMAIN\_ENTRY\_FLOOR}[d]$, $d \neq d_{\text{last}}$, and $d$ appears $< 2$ times in `recentDomains.slice(-6)`. All domain ties break by **canonical order `1..13` (§1.1)**; concept ties break by lowest $R_c$, then lowest $S_c$, then **concept order `1..24` (§1.3)**.
-- **Target Facet Rule (`chooseTargetFacet`):** For `concept-probe`, `targetFacet = "implementation"`. For all other slots, `targetFacet = "selection"` (planner inspects statement to confirm the target structure is not named in the title/signature/prompt) iff $\delta_{d,\text{impl}} - \delta_{d,\text{sel}} \ge 35$ or (`slotKind === "growth"` and `implAttempts(d) mod 3 === 2`); else `"implementation"`.
-- **5-Slot Schedule (`slotIndex = prescribedCount mod 5`):**
-  - **Slot 0 (`Growth`):** Eligible domain minimizing $\min(\delta_{d,\text{impl}} - 0.6\sigma_{d,\text{impl}},\; \delta_{d,\text{sel}} - 0.6\sigma_{d,\text{sel}})$, band $[\theta - 45, \theta + 10]$.
-  - **Slot 1 (`Concept Probe` → `Breadth` fallback):** First concept in `1..24` in an eligible domain with $\mu_0 \ge \text{minGlobalMu}$ that is unseen or `probed` (`probeCount < 2` and $\Delta t \ge 14\text{d}$), provided `< 3` concepts have $0 < S_c < 21\text{d}$, band $[\theta - 55, \theta - 15]$. **Fallback:** highest-$\sigma_{d,\text{impl}}$ eligible domain (`Breadth`), band $[\theta - 45, \theta + 10]$.
-  - **Slot 2 (`Consolidation` overflow → `Growth` fallback):** Converts to `Consolidation` if $\ge 2$ eligible concepts have $R_c \le 0.88$; else `Growth`.
-  - **Slot 3 (`Consolidation` → `Rusty` → `Breadth` → `Growth`):** Top eligible due concept ($R_c \le 0.88$) at $[\theta - 40, \theta + 5]$; else first eligible Rusty domain ($\Delta t \ge 45\text{d}$); else `Breadth` (if any eligible $\sigma_{d,\text{impl}} > 95$); else `Growth`.
-  - **Slot 4 (`Momentum`):** Highest-$\delta_{d,\text{impl}}$ eligible domain at $[\theta - 105, \theta - 55]$.
-- [`lib/prescription.ts:463`](../lib/prescription.ts) permits `evidenceIds: []` when `intent.slotKind ∈ {"growth", "breadth", "concept-probe"}` has no prior `SkillEvidence` in `targetDomain`. Clicking **Choose another** retains `intent` for 2 skips, rotating to the next eligible domain on skip 3.
+### 4.2 Onboarding & Deterministic Pacing Director (`selectDirectorIntent`)
+- **Stage 1 (4 curated Easies, `10–15m`):** Covers `hashing-prefix`, `two-pointers-window`, `stacks-queues-linked`, `binary-search`.
+- **Beginner / Low-$\mu_0$ Fallback:** `DOMAIN_MIN_GLOBAL_MU` restricts only `backtracking` ($\mu_0 \ge 980$); all 12 Easy domains stay eligible even when $\mu_0 = 738.14$. If cooldown filtering ever yields 0 candidates, the Director relaxes the 6-attempt cap first, then `prevDomain`, clamping target bands to `[CATALOG_DIFFICULTY_FLOOR[d], 1850]`.
+- **5-Slot Schedule (`slotIndex = prescribedCount mod 5`):** `Growth` (Slot 0/2) · `Concept Probe → Breadth` (Slot 1, `MAX_FRAGILE_CONCEPTS = 3`) · `Consolidation` overflow (Slot 2 if $\ge 2$ due concepts) · `Consolidation → Rusty → Breadth → Growth` (Slot 3) · `Momentum` (Slot 4).
 
 ---
 
-## 5. Machine-Verified Replay & Simulation Results ([`tests/skill-ratings-sim.test.ts`](../tests/skill-ratings-sim.test.ts))
+## 5. Machine-Asserted Replay & Simulation Results ([`tests/skill-ratings-sim.test.ts`](../tests/skill-ratings-sim.test.ts))
 
-All figures below are asserted directly in `npm test`:
+Every single value below is strictly asserted on every `npm test` run:
 
-1. **Replay of the 11 Assessed Historical & Native Sessions (22–26 Oct + 19 Nov, 24-day gap):**
-   - `Two Sum` and `Valid Parentheses` were reported previously solved (`solved` multiplier `0.25×`). Because all 11 predated the Director, `prescribedCount = 0`.
-   - Resulting state: **Global Base `1088 ± 112`**. Domain implementation means (`graphs-search: 1130`, `binary-search: 1125`, `two-pointers-window: 1100`, `hashing-prefix: 1099`, `sorting-intervals: 1097`, `heaps-ordered: 1069`, `stacks-queues-linked: 1068`) remain **provisional directional estimates inside $\sigma_{d,\text{impl}} \approx 106\text{–}109$** (`Calibrating` badge), not statistically separated mastery yet.
-   - Next 5 Director prescriptions starting Day 34 (`prescribedCount = 0..4`) span **5 distinct domains (`0` repeats)** and exercise `Selection` targeting on Slot 0:
+1. **Weak Onboarding Transition (`P1 #1`):** Scoring `0.0` on all 4 Stage-1 `D = 920` problems drops global base to **`738.14`**, and 3 consecutive Stage-2 `selectDirectorIntent` calls succeed without error, skipping `backtracking`, clamping `band[0] = 800`, and rotating distinct domains.
+2. **Strong Onboarding:** Four clean `D = 920` Stage-1 Easies move global base from `1000 ± 220` to **`1167 ± 146`**.
+3. **Replay of 11 Assessed Sessions (22–26 Oct + 19 Nov, `prescribedCount = 0`):**
+   - **Global Base:** **`1088 ± 112`** (`graphs-search: 1130 ± 107`, `binary-search: 1125 ± 106`, `two-pointers-window: 1100 ± 108`, `hashing-prefix: 1099 ± 107`, `sorting-intervals: 1097 ± 107`, `heaps-ordered: 1069 ± 109`, `stacks-queues-linked: 1068 ± 108` — provisional within $\sigma \approx 107$).
+   - **Next 5 Director Prescriptions (Days 34–38, `0` consecutive or `>2/6` repeats):**
      1. `Slot 0 [growth]`: `stacks-queues-linked` (`selection`) @ `1043–1098`
-     2. `Slot 1 [breadth]`: `arrays-strings` (`implementation`) @ `1043–1098` *(fragile concepts = 3 throttled new probe)*
+     2. `Slot 1 [breadth]`: `arrays-strings` (`implementation`) @ `1043–1098`
      3. `Slot 2 [consolidation]`: `hashing-prefix` (`implementation`, `prefix-sum-map`) @ `1059–1104`
      4. `Slot 3 [consolidation]`: `sorting-intervals` (`implementation`, `custom-comparator-intervals`) @ `1057–1102`
      5. `Slot 4 [momentum]`: `graphs-search` (`implementation`) @ `1025–1075`
-2. **90-Day Synthetic Convergence (1 prescribed problem/day):**
-   - **Beginner (true `900`):** `889 ± 50` global (`28` disguised `Selection` prescriptions, `0` cooldown violations).
-   - **Intermediate (true `1150`):** `1119 ± 50` global (`graphs-search: 1150`, `dynamic-programming: 1082`, `38` `Selection` prescriptions).
-   - **Strong (true `1350`):** `1326 ± 50` global (`28` `Selection` prescriptions).
+4. **90-Day Synthetic Convergence (`0` cooldown violations asserted on all 270 days):**
+   - **Beginner (true `900`):** **`889 ± 50`** (`graphs: 947`, `dp: 875`, `28` Selection prescriptions).
+   - **Intermediate (true `1150`):** **`1119 ± 50`** (`graphs: 1150`, `dp: 1082`, `38` Selection prescriptions).
+   - **Strong (true `1350`):** **`1326 ± 50`** (`graphs: 1320`, `dp: 1359`, `28` Selection prescriptions).
