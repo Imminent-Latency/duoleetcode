@@ -51,6 +51,13 @@ export type ReviewFlagSummary = {
   traceState: "captured" | "unavailable" | "none";
   traceCount: number;
 };
+export type AttemptReviewFlag = ReviewFlagSummary & {
+  messageId?: string;
+  evaluationCreatedAt?: number;
+  traceId?: string;
+  focus?: import("./types").ReplayFocus | null;
+  editor?: import("./types").EditorChatContext | null;
+};
 export type ReviewFlag = ReviewFlagSummary & {
   bundle: {
     format: "duoleetcode-review-flag";

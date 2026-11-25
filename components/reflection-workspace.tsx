@@ -25,12 +25,20 @@ import { ApproachContext, DevelopmentSummary } from "./reflection-development";
 import QuestionReviewDetails from "./question-review-details";
 import { useEditorChat } from "./use-editor-chat";
 import { ChatCodeContext, SavedCodeContext } from "./chat-code-context";
-import { javaHelpMoments } from "@/lib/java-help";
+import {
+  TimelineInspectorCard,
+  TimelineOverlayTrack,
+  useAttemptReviewFlags,
+} from "./timeline-markers";
+import {
+  buildTimelineProjection,
+  type TimelineSelection,
+} from "@/lib/timeline-markers";
 import ReflectionIntakeForm from "./reflection-intake";
 import { needsReflectionIntake } from "@/lib/reflection-intake";
 import type { CoachRequest } from "./focused-learning";
-import type { Attempt, Moment, ReplayFocus } from "@/lib/types";
-import { candidateMoments, replay } from "@/lib/recording";
+import type { Attempt, ReplayFocus } from "@/lib/types";
+import { replay } from "@/lib/recording";
 import { pauseMetadata, solvingTime } from "@/lib/assessment-time";
 import {
   focusTimes,
@@ -94,7 +102,7 @@ export default function ReflectionWorkspace({
   const [sending, setSending] = useState(false);
   const [savingIntake, setSavingIntake] = useState(false);
   const [focused, setFocused] = useState<ReplayFocus | null>(null);
-  const [selectedMoment, setSelectedMoment] = useState<Moment>();
+  const [selectedTimelineId, setSelectedTimelineId] = useState<string>();
   const started = useRef(new Set<string>());
   const followed = useRef<string | undefined>(undefined);
   const request = useRef<CoachRequest | undefined>(undefined);
@@ -115,15 +123,15 @@ export default function ReflectionWorkspace({
   const evaluation = last
     ? a.evaluations[last.evaluationRevision ?? a.evaluations.length - 1]
     : undefined;
-  const moments = [
-    ...(evaluation?.moments ?? candidateMoments(a.events, a)),
-    ...javaHelpMoments(a),
-  ]
-    .filter(
-      (m, i, all) =>
-        all.findIndex((x) => x.seq === m.seq && x.label === m.label) === i,
-    )
-    .sort((x, y) => x.seq - y.seq);
+  const reviewFlags = useAttemptReviewFlags(a.id);
+  const timeline = useMemo(
+    () => buildTimelineProjection(a, evaluation, reviewFlags),
+    [a, evaluation, reviewFlags],
+  );
+  const selectedTimelineItem = useMemo(
+    () => timeline.chronologicalItems.find((x) => x.id === selectedTimelineId),
+    [timeline.chronologicalItems, selectedTimelineId],
+  );
   const seq =
     selectedSeq ??
     eventTimes.findLast((e) => e.elapsedMs <= playhead)?.seq ??
@@ -152,7 +160,7 @@ export default function ReflectionWorkspace({
     const [start, end] = state.range;
     setFocused(focus);
     setFocusOwner(owner);
-    setSelectedMoment(undefined);
+    setSelectedTimelineId(undefined);
     setDiff(false);
     setPlaybackEpoch((n) => n + 1);
     setSelectedSeq(autoplay ? state.seq : focus.startSeq);
@@ -166,6 +174,30 @@ export default function ReflectionWorkspace({
       setLoop(false);
       setPlaying(false);
     }
+  };
+  const jumpToSeq = (targetSeq: number) => {
+    const bounded = Math.max(0, Math.min(a.lastSeq, targetSeq));
+    setPlaying(false);
+    setDiff(false);
+    setSelectedSeq(bounded);
+    setPlayhead(timeAtSequence(a, bounded));
+  };
+  const selectTimelineItem = (item: TimelineSelection) => {
+    const hasSpan = item.endSeq > item.startSeq;
+    const focus: ReplayFocus = {
+      startSeq: item.startSeq,
+      endSeq: item.endSeq,
+      pauseSeq: item.pauseSeq ?? null,
+      mode: hasSpan ? "range" : "snapshot",
+      label: item.label,
+    };
+    showFocus(focus, false);
+    if (hasSpan) {
+      const inspectSeq = item.pauseSeq ?? item.endSeq;
+      setSelectedSeq(inspectSeq);
+      setPlayhead(timeAtSequence(a, inspectSeq));
+    }
+    setSelectedTimelineId(item.id);
   };
   const pauseAtFocus = (focus: ReplayFocus) => {
     const seq = replayPauseSequence(a, focus);
@@ -182,18 +214,6 @@ export default function ReflectionWorkspace({
   };
   const canReplayFocus = (focus: ReplayFocus) =>
     coachReplayState(a, focus).playing;
-  const showMoment = (m: Moment) => {
-    showFocus(
-      {
-        startSeq: m.seq,
-        endSeq: m.endSeq ?? m.seq,
-        mode: m.endSeq && m.endSeq > m.seq ? "range" : "snapshot",
-        label: m.label,
-      },
-      false,
-    );
-    setSelectedMoment(m);
-  };
   useEffect(() => {
     try {
       setFollow(localStorage.getItem("duo-reflection-follow") !== "false");
@@ -377,17 +397,30 @@ export default function ReflectionWorkspace({
                 </small>
               </div>
             )}
-            {selectedMoment && !intakeActive && (
-              <div className="reflection-observation">
-                <p>
-                  <strong>Observed:</strong> {selectedMoment.observation}
-                </p>
-                <p>
-                  <strong>Possible explanation:</strong>{" "}
-                  {selectedMoment.interpretation}
-                </p>
-                <CoachText>{selectedMoment.question}</CoachText>
-              </div>
+            {selectedTimelineItem && (
+              <TimelineInspectorCard
+                attempt={a}
+                item={selectedTimelineItem}
+                items={timeline.chronologicalItems}
+                diffActive={diff}
+                formatTime={time}
+                onSelectItem={selectTimelineItem}
+                onJumpSeq={jumpToSeq}
+                onToggleDiff={() => {
+                  setPlaying(false);
+                  if (!diff && selectedTimelineItem.endSeq > selectedTimelineItem.startSeq) {
+                    setSelectedSeq(selectedTimelineItem.endSeq);
+                    setPlayhead(timeAtSequence(a, selectedTimelineItem.endSeq));
+                  }
+                  setDiff(!diff);
+                }}
+                onReplayRange={(focus) => {
+                  const keepId = selectedTimelineItem.id;
+                  showFocus(focus, true, keepId);
+                  setSelectedTimelineId(keepId);
+                }}
+                onClose={() => setSelectedTimelineId(undefined)}
+              />
             )}
             <div className="reflection-editor">
               <CodeEditor
@@ -475,6 +508,13 @@ export default function ReflectionWorkspace({
                 }}
                 label={time}
               />
+              <TimelineOverlayTrack
+                projection={timeline}
+                playheadPct={total > 0 ? (playhead / total) * 100 : 0}
+                selectedId={selectedTimelineId}
+                onSelect={selectTimelineItem}
+                formatTime={time}
+              />
               <div className="reflection-range-label">
                 <span>
                   Replay range · {time(range[0])}–{time(range[1])}
@@ -503,7 +543,7 @@ export default function ReflectionWorkspace({
                     setPlaying(false);
                     setRange([0, total]);
                     setFocused(null);
-                    setSelectedMoment(undefined);
+                    setSelectedTimelineId(undefined);
                   }}
                 >
                   Full recording
@@ -556,24 +596,6 @@ export default function ReflectionWorkspace({
                   ))}
                 </details>
               )}
-              <div className="reflection-flags" aria-label="Flagged moments">
-                {moments.map((m, index) => (
-                  <Button
-                    key={index}
-                    className="button secondary"
-                    onClick={() => showMoment(m)}
-                  >
-                    <Flag size={12} />
-                    {m.label}
-                  </Button>
-                ))}
-                {!moments.length && (
-                  <span>
-                    Flagged moments will appear here as the coach reviews your
-                    attempt.
-                  </span>
-                )}
-              </div>
             </div>
           </div>
         }

@@ -7,6 +7,7 @@ import { validateEditorContext } from "./editor-context";
 import type { Attempt } from "./types";
 import {
   reviewFlagInputSchema,
+  type AttemptReviewFlag,
   type ReviewFlag,
   type ReviewFlagSummary,
 } from "./review-flag-types";
@@ -48,6 +49,46 @@ export class ReviewFlags {
           .get(...args)!.n,
       ),
     };
+  }
+  forAttempt(attemptId: string): AttemptReviewFlag[] {
+    const parseJson = <T>(raw: unknown): T | null => {
+      if (typeof raw !== "string" || !raw) return null;
+      try {
+        return JSON.parse(raw) as T;
+      } catch {
+        return null;
+      }
+    };
+    return this.log.db
+      .prepare(
+        `SELECT
+          status,
+          summary,
+          json_extract(bundle, '$.target.messageId') AS messageId,
+          json_extract(bundle, '$.target.createdAt') AS evaluationCreatedAt,
+          COALESCE(
+            json_extract(bundle, '$.target.traceId'),
+            json_extract(bundle, '$.context.selectedItem.research.traceId'),
+            json_extract(bundle, '$.context.run.id')
+          ) AS traceId,
+          json_extract(bundle, '$.context.focus') AS focusJson,
+          json_extract(bundle, '$.context.editor') AS editorJson
+        FROM review_flags
+        WHERE json_extract(summary, '$.attemptId') = ?
+        ORDER BY createdAt ASC, rowid ASC`,
+      )
+      .all(attemptId)
+      .map((r) => ({
+        ...(JSON.parse(String(r.summary)) as ReviewFlagSummary),
+        status: r.status as "open" | "resolved",
+        ...(typeof r.messageId === "string" ? { messageId: r.messageId } : {}),
+        ...(typeof r.evaluationCreatedAt === "number"
+          ? { evaluationCreatedAt: r.evaluationCreatedAt }
+          : {}),
+        ...(typeof r.traceId === "string" ? { traceId: r.traceId } : {}),
+        focus: parseJson(r.focusJson),
+        editor: parseJson(r.editorJson),
+      }));
   }
   setStatus(id: string, status: "open" | "resolved") {
     this.get(id);

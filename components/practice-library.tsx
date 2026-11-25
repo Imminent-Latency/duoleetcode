@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Group, Select, Tabs, TextInput } from "@mantine/core";
 import {
   ArrowDownToLine,
@@ -11,11 +11,18 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/browser";
 import { replay } from "@/lib/recording";
+import { timeAtSequence } from "@/lib/reflection";
+import { buildTimelineProjection } from "@/lib/timeline-markers";
 import type { Attempt, AttemptSummary } from "@/lib/types";
 import { Button, Panel } from "./ui";
 import CoachText from "./coach-text";
 import ResearchSources from "./research-sources";
 import { JudgeResults } from "./test-workbench";
+import {
+  TimelineInspectorCard,
+  TimelineOverlayTrack,
+  useAttemptReviewFlags,
+} from "./timeline-markers";
 
 type Preview = {
   preparedAt: string;
@@ -352,6 +359,16 @@ export function SavedSession({
   readOnly?: boolean;
 }) {
   const [seq, setSeq] = useState(a.lastSeq);
+  const [selectedTimelineId, setSelectedTimelineId] = useState<string>();
+  const reviewFlags = useAttemptReviewFlags(a.id, !readOnly);
+  const timeline = useMemo(
+    () => buildTimelineProjection(a, a.evaluations.at(-1), reviewFlags),
+    [a, reviewFlags],
+  );
+  const selectedTimelineItem = useMemo(
+    () => timeline.chronologicalItems.find((x) => x.id === selectedTimelineId),
+    [timeline.chronologicalItems, selectedTimelineId],
+  );
   const activeMs =
     a.endedAt === undefined
       ? undefined
@@ -423,6 +440,36 @@ export function SavedSession({
                   onChange={(e) => setSeq(Number(e.target.value))}
                 />
               </label>
+            )}
+            <TimelineOverlayTrack
+              projection={timeline}
+              playheadPct={
+                timeline.totalMs > 0
+                  ? (timeAtSequence(a, seq) / timeline.totalMs) * 100
+                  : a.lastSeq > 0
+                    ? (seq / a.lastSeq) * 100
+                    : 0
+              }
+              selectedId={selectedTimelineId}
+              onSelect={(item) => {
+                setSelectedTimelineId(item.id);
+                setSeq(item.pauseSeq ?? item.endSeq);
+              }}
+            />
+            {selectedTimelineItem && (
+              <TimelineInspectorCard
+                attempt={a}
+                item={selectedTimelineItem}
+                items={timeline.chronologicalItems}
+                onSelectItem={(item) => {
+                  setSelectedTimelineId(item.id);
+                  setSeq(item.pauseSeq ?? item.endSeq);
+                }}
+                onJumpSeq={(targetSeq) =>
+                  setSeq(Math.max(0, Math.min(a.lastSeq, targetSeq)))
+                }
+                onClose={() => setSelectedTimelineId(undefined)}
+              />
             )}
             <pre className="library-code">
               {seq === a.lastSeq ? a.source : replay(a, seq)}

@@ -8,12 +8,19 @@ export async function GET(req: Request) {
     const q = z
       .object({
         id: z.string().uuid().optional(),
+        attemptId: z.string().uuid().optional(),
         status: z.enum(["open", "resolved"]).optional(),
         offset: z.coerce.number().int().min(0).max(1000000).default(0),
       })
       .parse(Object.fromEntries(new URL(req.url).searchParams));
     const flags = new ReviewFlags();
-    return json(q.id ? flags.get(q.id) : flags.list(q.status, q.offset));
+    return json(
+      q.id
+        ? flags.get(q.id)
+        : q.attemptId
+          ? { flags: flags.forAttempt(q.attemptId) }
+          : flags.list(q.status, q.offset),
+    );
   } catch (e) {
     return failure(e);
   }
