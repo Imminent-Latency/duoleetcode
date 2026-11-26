@@ -61,7 +61,9 @@ import {
 } from "lucide-react";
 import { api, bridge, mergeJob, Recorder } from "@/lib/browser";
 import {
+  CPP_MIN_BRIDGE_VERSION,
   initialBridgeState,
+  isBridgeVersionAtLeast,
   popupWindowBounds,
   popupWindowFeatures,
   probeLeetCodeBridge,
@@ -861,15 +863,22 @@ export default function Workspace() {
   const judge = async (kind: "run" | "submit", input: string) => {
     if (!attempt || !recorder.current || judgeBusy) return;
     const lang = attemptLanguage(attempt);
-    if (
-      lang === "cpp" &&
-      connection.version &&
-      connection.version.localeCompare("0.1.7", undefined, { numeric: true }) < 0
-    ) {
-      setError(
-        "Reload DuoLeetCode Local Bridge (v0.1.7+) in chrome://extensions before running or submitting C++ code.",
-      );
-      return;
+    if (lang === "cpp") {
+      let pingVersion: string | undefined;
+      try {
+        const meta = await bridge("ping");
+        pingVersion =
+          typeof meta?.version === "string" ? meta.version : undefined;
+      } catch (e) {
+        showError(e);
+        return;
+      }
+      if (!isBridgeVersionAtLeast(pingVersion, CPP_MIN_BRIDGE_VERSION)) {
+        setError(
+          `C++26 requires DuoLeetCode Local Bridge v${CPP_MIN_BRIDGE_VERSION}+ (loaded: ${pingVersion ? `v${pingVersion}` : "unknown"}). In chrome://extensions, remove the older DuoLeetCode Local Bridge and click "Load unpacked" on spikes/leetcode/extension from this branch, then retry.`,
+        );
+        return;
+      }
     }
     setJudgeBusy(true);
     setError("");
@@ -1166,6 +1175,31 @@ export default function Workspace() {
             </Button>
           </div>
         )}
+        {view === "attempt" &&
+          live &&
+          attempt &&
+          attemptLanguage(attempt) === "cpp" &&
+          connection.bridgeReachable &&
+          !isBridgeVersionAtLeast(
+            connection.version,
+            CPP_MIN_BRIDGE_VERSION,
+          ) && (
+            <div role="alert" className="banner error">
+              <span>
+                C++26 requires DuoLeetCode Local Bridge v
+                {CPP_MIN_BRIDGE_VERSION}+ (loaded:{" "}
+                {connection.version ? `v${connection.version}` : "unknown"}).
+                In chrome://extensions, remove the older extension and Load
+                unpacked from spikes/leetcode/extension on this branch.
+              </span>
+              <Button
+                className="button secondary compact"
+                onClick={() => void checkBridge({ manual: true })}
+              >
+                Re-check bridge
+              </Button>
+            </div>
+          )}
         {error && (
           <div role="alert" className="banner error">
             <span>{error}</span>

@@ -6,6 +6,7 @@ import {
   extractLeetCodeCommentedTypes,
   wrapCppForLsp,
 } from "../lib/cpp-lsp";
+import { shouldOfferSnippets } from "../lib/cpp-snippets";
 import { GET, POST } from "../app/api/cpp/lsp/route";
 
 test("extractLeetCodeCommentedTypes extracts commented LeetCode structs without duplicating defined ones", () => {
@@ -166,5 +167,53 @@ test("C++ LSP API rejects foreign origins and invalid methods before running cla
     assert.equal((await POST(badMethod)).status, 400);
   } finally {
     await cppLsp().close();
+  }
+});
+
+test("shouldOfferSnippets suppresses snippets after ::, ., and -> member/scope operators", () => {
+  assert.equal(shouldOfferSnippets("        std::"), false);
+  assert.equal(shouldOfferSnippets("        ptr->"), false);
+  assert.equal(shouldOfferSnippets("        v."), false);
+  assert.equal(shouldOfferSnippets("        "), true);
+  assert.equal(shouldOfferSnippets("        sort("), true);
+});
+
+test("clangd completion on std::cout omits duplicate std:: and omits #include edits", async () => {
+  const server = new CppLspServer();
+  try {
+    const status = await server.prepare();
+    if (!status.ready) return;
+
+    const code = [
+      "class Solution {",
+      "public:",
+      "    void greet() {",
+      "        std::cou",
+      "    }",
+      "};",
+      "",
+    ].join("\n");
+
+    await server.diagnostics(code);
+    const completion = (await server.completion(code, { line: 3, character: 16 })) as {
+      items?: Array<{
+        label?: string;
+        insertText?: string;
+        textEdit?: { newText?: string };
+        additionalTextEdits?: Array<{ newText?: string }>;
+      }>;
+    };
+    const items = Array.isArray(completion) ? completion : (completion.items ?? []);
+    const coutItem = items.find((item) => item.label?.includes("cout"));
+    assert.ok(coutItem, "Expected clangd to suggest cout after std::cou");
+    assert.equal(coutItem.textEdit?.newText ?? coutItem.insertText, "cout");
+    assert.equal(
+      (coutItem.additionalTextEdits ?? []).some((e: { newText?: string }) =>
+        e.newText?.includes("#include"),
+      ),
+      false,
+    );
+  } finally {
+    await server.close();
   }
 });

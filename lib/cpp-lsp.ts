@@ -625,7 +625,11 @@ export class CppLspServer {
         if (Array.isArray(mapped.additionalTextEdits)) {
           mapped.additionalTextEdits = mapped.additionalTextEdits
             .map((e: LspTextEdit) => shiftLspEdit(e, -lineOffset))
-            .filter((e: LspTextEdit) => e.range.start.line >= 0);
+            .filter(
+              (e: LspTextEdit) =>
+                e.range.start.line >= 0 &&
+                !/^\s*#include\s+<[^>]+>\s*$/.test(e.newText),
+            );
         }
         return mapped;
       });

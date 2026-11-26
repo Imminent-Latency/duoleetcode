@@ -14,6 +14,23 @@ export type BridgeStateKind =
 
 export const LEETCODE_LOGIN_URL = "https://leetcode.com/accounts/login/";
 export const LEETCODE_HOME_URL = "https://leetcode.com/";
+export const CPP_MIN_BRIDGE_VERSION = "0.1.7";
+
+export function isBridgeVersionAtLeast(
+  version: string | undefined,
+  minimum: string,
+): boolean {
+  if (!version || !/^\d+(?:\.\d+)*$/.test(version.trim())) return false;
+  const a = version.trim().split(".").map(Number);
+  const b = minimum.trim().split(".").map(Number);
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const av = a[i] ?? 0;
+    const bv = b[i] ?? 0;
+    if (av !== bv) return av > bv;
+  }
+  return true;
+}
 
 export type BridgeConnection = {
   kind: BridgeStateKind;

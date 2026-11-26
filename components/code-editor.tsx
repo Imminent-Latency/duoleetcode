@@ -10,7 +10,7 @@ import { importForCompletion, importQuickFixes } from "@/lib/java-imports";
 import { javaCompletions } from "@/lib/java-completions";
 import type { Edit, EditorContextDraft } from "@/lib/types";
 import { javaSnippets } from "@/lib/java-snippets";
-import { cppSnippets } from "@/lib/cpp-snippets";
+import { cppSnippets, shouldOfferSnippets } from "@/lib/cpp-snippets";
 import { languageConfig, type LanguageId } from "@/lib/languages";
 import { installSpelling } from "./editor-spelling";
 loader.config({ paths: { vs: "/monaco/vs" } });
@@ -724,23 +724,28 @@ export default function CodeEditor({
             return { suggestions: [] };
           const version = model.getVersionId();
           const word = model.getWordUntilPosition(pos);
-          const snippets = activeSnippets
-            .filter(
-              (s) => word.word.length > 0 && s.label.startsWith(word.word),
-            )
-            .map((s) => ({
-              ...s,
-              kind: monaco.languages.CompletionItemKind.Snippet,
-              insertTextRules:
-                monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              range: new monaco.Range(
-                pos.lineNumber,
-                word.startColumn,
-                pos.lineNumber,
-                word.endColumn,
-              ),
-              sortText: "0" + s.label,
-            }));
+          const linePrefix = model
+            .getLineContent(pos.lineNumber)
+            .slice(0, word.startColumn - 1);
+          const snippets = shouldOfferSnippets(linePrefix)
+            ? activeSnippets
+                .filter(
+                  (s) => word.word.length > 0 && s.label.startsWith(word.word),
+                )
+                .map((s) => ({
+                  ...s,
+                  kind: monaco.languages.CompletionItemKind.Snippet,
+                  insertTextRules:
+                    monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                  range: new monaco.Range(
+                    pos.lineNumber,
+                    word.startColumn,
+                    pos.lineNumber,
+                    word.endColumn,
+                  ),
+                  sortText: "0" + s.label,
+                }))
+            : [];
           if (snippets.some((s) => s.label === word.word))
             return { suggestions: snippets };
           try {

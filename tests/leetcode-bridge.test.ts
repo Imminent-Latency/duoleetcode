@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  CPP_MIN_BRIDGE_VERSION,
   initialBridgeState,
+  isBridgeVersionAtLeast,
   LEETCODE_HOME_URL,
   LEETCODE_LOGIN_URL,
   popupWindowFeatures,
@@ -276,4 +278,12 @@ test("watchLeetCodeLogin stops immediately when cancelled or shouldStop becomes 
   stop();
   await new Promise((r) => setTimeout(r, 40));
   assert.equal(calls, 0);
+});
+
+test("isBridgeVersionAtLeast requires an explicit minimum semver and fails closed", () => {
+  assert.equal(isBridgeVersionAtLeast(undefined, CPP_MIN_BRIDGE_VERSION), false);
+  assert.equal(isBridgeVersionAtLeast("0.1.6", CPP_MIN_BRIDGE_VERSION), false);
+  assert.equal(isBridgeVersionAtLeast("0.1.7", CPP_MIN_BRIDGE_VERSION), true);
+  assert.equal(isBridgeVersionAtLeast("0.1.10", CPP_MIN_BRIDGE_VERSION), true);
+  assert.equal(isBridgeVersionAtLeast("0.2.0", CPP_MIN_BRIDGE_VERSION), true);
 });

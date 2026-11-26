@@ -1,4 +1,8 @@
 // Templates complement semantic completion; they are not C++ language syntax.
+export function shouldOfferSnippets(linePrefix: string): boolean {
+  return !/(?:->|::|\.)\s*$/.test(linePrefix);
+}
+
 export const cppSnippets = [
   {
     label: "cout",
