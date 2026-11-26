@@ -34,7 +34,7 @@ export const replayFocusSchema = z.object({
 });
 export const reflectionResultSchema = z.object({
   askedQuestionIds: z.array(z.string()).max(4).optional(),
-  surfacedQuestionIds: z.array(z.string()).max(6).optional(),
+  surfacedQuestionIds: z.array(z.string()).max(12).optional(),
   coachingSelectionNote: z.string().trim().min(1).max(400).optional(),
   message: z.string().trim().min(1).max(10000),
   status: z.enum(["exploring", "ready"]),
@@ -99,7 +99,7 @@ const outputCheck = z.union([
 ]);
 export const reflectionOutputSchema = reflectionResultSchema.extend({
   askedQuestionIds: z.array(z.string()).max(4),
-  surfacedQuestionIds: z.array(z.string()).max(6),
+  surfacedQuestionIds: z.array(z.string()).max(12),
   coachingSelectionNote: z.string().trim().min(1).max(400),
   evaluation: reflectionResultSchema.shape.evaluation
     .omit({ questionReview: true })

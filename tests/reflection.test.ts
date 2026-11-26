@@ -689,3 +689,11 @@ test("retrieved source receipts persist with preparation, the exact assistant tu
   assert.deepEqual(db.get(id).evaluations.at(-1)?.research, research);
   db.db.close();
 });
+
+test("reflectionOutputSchema allows up to 12 surfacedQuestionIds and rejects >12", () => {
+  const schema = reflectionOutputSchema.shape.surfacedQuestionIds;
+  const eight = ["q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8"];
+  assert.deepEqual(schema.parse(eight), eight);
+  const thirteen = Array.from({ length: 13 }, (_, i) => `q${i + 1}`);
+  assert.throws(() => schema.parse(thirteen));
+});

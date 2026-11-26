@@ -22,11 +22,44 @@ type Pending = {
   resolve: (v: JavaSymbolEvidence) => void;
   reject: (e: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  fullTimeoutMs: number;
+  promoted: boolean;
+  createdAt: number;
 };
 const shared = globalThis as typeof globalThis & {
   duoSymbolJobs?: Map<string, Pending>;
+  duoSymbolHeartbeats?: Map<string, number>;
 };
 const jobs = (shared.duoSymbolJobs ??= new Map());
+const heartbeats = (shared.duoSymbolHeartbeats ??= new Map());
+export function recordSymbolBridgePoll(attemptId: string, now = Date.now()) {
+  for (const [id, seenAt] of heartbeats) {
+    if (now - seenAt > 60_000) heartbeats.delete(id);
+  }
+  heartbeats.set(attemptId, now);
+}
+export function hasActiveSymbolBridge(
+  attemptId: string,
+  now = Date.now(),
+  ttlMs = 5_000,
+) {
+  const seenAt = heartbeats.get(attemptId);
+  return seenAt !== undefined && now - seenAt <= ttlMs;
+}
+export function clearSymbolBridgeHeartbeats() {
+  heartbeats.clear();
+}
+export function browserSymbolsDisabled(disableOption?: boolean) {
+  return Boolean(disableOption || process.env.DUO_DISABLE_BROWSER_SYMBOLS === "1");
+}
+function rejectUnavailable(id: string, reject: (e: Error) => void) {
+  jobs.delete(id);
+  reject(
+    new Error(
+      "Browser Java lookup unavailable. Do not claim that LSP resolved this call; use the supplied code and official references, or state uncertainty.",
+    ),
+  );
+}
 export function symbolSnapshot(a: Attempt, input: unknown) {
   const args = symbolArgs.parse(input);
   if (
@@ -60,30 +93,46 @@ export function requestJavaSymbol(
   a: Attempt,
   input: unknown,
   timeout = 20000,
+  opts?: { noBridgeTimeout?: number },
 ): Promise<JavaSymbolEvidence> {
   const snapshot = symbolSnapshot(a, input),
-    id = randomUUID();
+    id = randomUUID(),
+    createdAt = Date.now(),
+    promoted =
+      opts?.noBridgeTimeout === undefined || hasActiveSymbolBridge(a.id),
+    initialTimeout = promoted
+      ? timeout
+      : Math.min(timeout, opts.noBridgeTimeout!);
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      jobs.delete(id);
-      reject(
-        new Error(
-          "Browser Java lookup unavailable. Do not claim that LSP resolved this call; use the supplied code and official references, or state uncertainty.",
-        ),
-      );
-    }, timeout);
+    const timer = setTimeout(
+      () => rejectUnavailable(id, reject),
+      initialTimeout,
+    );
     jobs.set(id, {
       job: { id, attemptId: a.id, ...snapshot },
       resolve,
       reject,
       timer,
+      fullTimeoutMs: timeout,
+      promoted,
+      createdAt,
     });
   });
 }
 export function pendingSymbolJobs(attemptId: string) {
-  return [...jobs.values()]
-    .filter((p) => p.job.attemptId === attemptId)
-    .map((p) => p.job);
+  const now = Date.now();
+  const out: SymbolJob[] = [];
+  for (const [id, p] of jobs) {
+    if (p.job.attemptId !== attemptId) continue;
+    if (!p.promoted) {
+      clearTimeout(p.timer);
+      p.promoted = true;
+      const remaining = Math.max(1, p.fullTimeoutMs - (now - p.createdAt));
+      p.timer = setTimeout(() => rejectUnavailable(id, p.reject), remaining);
+    }
+    out.push(p.job);
+  }
+  return out;
 }
 export const symbolReplySchema = z.object({
   attemptId: z.string().uuid(),

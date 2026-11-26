@@ -16,6 +16,7 @@ if (process.env.DUO_DATABASE !== ":memory:")
   throw Error(
     "Run stock-retrospective-eval with DUO_DATABASE=:memory: and an isolated DUO_TRACE_DATABASE.",
   );
+process.env.DUO_DISABLE_BROWSER_SYMBOLS ??= "1";
 
 const rawCapture = JSON.parse(
   readFileSync(

@@ -23,6 +23,10 @@ import {
   questionAnalystPolicy,
   questionJudgePolicy,
 } from "./question-review-policy";
+import {
+  compactNotebookContext,
+  type ReflectionNotebook,
+} from "./reflection-notebook";
 
 export type ReviewStage =
   "question-generation" | "question-analysis" | "question-judgment";
@@ -40,6 +44,7 @@ export type ReviewStageRunner = (
   input: unknown,
   schema: unknown,
   validate: (value: unknown) => void,
+  stageOpts?: { notebook?: ReflectionNotebook; branchId?: string },
 ) => Promise<ReviewStageResult>;
 
 export function latestQuestionReview(a: Attempt) {
@@ -155,10 +160,24 @@ export function questionInventory(a: Attempt) {
   };
 }
 
+export function questionRecordingHash(a: Attempt) {
+  const { conversation: _c, intake: _i, optimizationDeferredAt: _o, ...recording } =
+    questionInventory(a);
+  return traceHash({
+    recording,
+    policies: [
+      questionGeneratorPolicy,
+      questionAnalystPolicy,
+      questionJudgePolicy,
+    ],
+  });
+}
+
 export async function reviewQuestions(
   a: Attempt,
   run: ReviewStageRunner,
   choice?: { model: string; effort: string },
+  options?: { notebook?: ReflectionNotebook },
 ): Promise<QuestionReview> {
   const inventory = questionInventory(a);
   const { conversation, intake, optimizationDeferredAt, ...recording } =
@@ -206,12 +225,28 @@ export async function reviewQuestions(
       const questions = new Map(
         [...entries].map(([id, e]) => [id, e.question]),
       );
+      const nb = options?.notebook;
+      const genInventory = nb
+        ? {
+            problem: inventory.problem,
+            finalSource: inventory.finalSource,
+            lastSeq: inventory.lastSeq,
+            implementation: inventory.implementation,
+            jobs: inventory.jobs,
+            annotations: inventory.annotations,
+            timing: inventory.timing,
+            intake: inventory.intake,
+            conversation: inventory.conversation,
+            optimizationDeferredAt: inventory.optimizationDeferredAt,
+            ...compactNotebookContext(a, nb),
+          }
+        : inventory;
       const planResult = await run(
         "question-generation",
         questionGeneratorPolicy,
         {
           topics: reviewTopics,
-          inventory,
+          inventory: genInventory,
           previous: reviewedQuestions(previous),
           newMessages: conversation.filter(
             (m) => !previous?.throughMessageIds.includes(m.id),
@@ -249,6 +284,7 @@ export async function reviewQuestions(
             );
           validateCoverage(p.coverage, ids);
         },
+        nb ? { notebook: nb } : undefined,
       );
       const plan = questionPlanSchema.parse(planResult.value);
       for (const q of plan.questions) questions.set(q.id, q);
@@ -270,227 +306,298 @@ export async function reviewQuestions(
         for (let i = 0; i < pending.length; i += 4)
           groups.push(pending.slice(i, i + 4).map((id) => questions.get(id)!));
         for (let i = 0; i < groups.length; i += 2) {
-          const results = await Promise.allSettled(
-            groups.slice(i, i + 2).map(async (group) => {
-              const seqs = new Set(group.flatMap((q) => q.anchors.sequences));
-              const helpIds = new Set(
-                group.flatMap((q) => q.anchors.assistanceIds),
-              );
-              const result = await run(
-                "question-analysis",
-                questionAnalystPolicy,
-                {
-                  questions: group,
-                  focusedEvidence: {
-                    finalSource: a.source,
-                    problem: a.problem,
-                    intake,
-                    conversation,
-                    checkpoints: inventory.implementation.checkpoints.filter(
-                      (p) => seqs.has(p.seq),
-                    ),
-                    assistance: inventory.javaAssistance.filter((h) =>
-                      helpIds.has(h.id),
-                    ),
-                    annotations: a.annotations,
-                  },
-                  inventory: {
-                    events: inventory.events,
-                    jobs: a.jobs,
-                    timing: inventory.timing,
-                    assistanceLinks: inventory.implementation.assistanceLinks,
-                    allAssistanceQuestions: inventory.javaAssistance.map(
-                      (h) => ({ id: h.id, question: h.question }),
-                    ),
-                    availableCheckpointSequences:
-                      inventory.implementation.checkpoints.map((p) => p.seq),
-                    solvingChunks: inventory.solvingChunks,
-                  },
-                  additionalEvidencePass: round > 0,
-                },
-                z.toJSONSchema(questionAnswersSchema),
-                (value) => {
-                  const parsed = questionAnswersSchema.parse(value);
-                  exactIds(
-                    parsed.answers.map((x) => x.questionId),
-                    group.map((q) => q.id),
-                    "Answers",
-                  );
-                  for (const answer of parsed.answers)
-                    validateQuestionAnswer(
-                      a,
-                      questions.get(answer.questionId)!,
-                      answer,
-                    );
-                },
-              );
-              const parsed = questionAnswersSchema.parse(result.value);
-              const urls = new Set([
-                ...(a.solvingChunks ?? []).flatMap(
-                  (c) => c.sources?.map((s) => s.url) ?? [],
+          const batch = groups.slice(i, i + 2);
+          const branches = nb
+            ? await Promise.all(
+                batch.map((_, offset) =>
+                  nb.fork(
+                    "question-analysis",
+                    `r${round + 1}-b${i + offset + 1}`,
+                  ),
                 ),
-                ...(result.research?.sources.map((s) => s.url) ?? []),
-              ]);
-              for (const answer of parsed.answers)
-                validateQuestionAnswer(
-                  a,
-                  questions.get(answer.questionId)!,
-                  answer,
-                  urls,
+              )
+            : [];
+          try {
+            const results = await Promise.allSettled(
+              batch.map(async (group, offset) => {
+                const branch = branches[offset];
+                const seqs = new Set(group.flatMap((q) => q.anchors.sequences));
+                const helpIds = new Set(
+                  group.flatMap((q) => q.anchors.assistanceIds),
                 );
-              return { parsed, result };
-            }),
-          );
-          // Wait for siblings before throwing so diagnostics don't keep orphan work running.
-          for (const result of results) {
-            if (result.status === "rejected") throw result.reason;
-            stageEvidence.push(result.value.result);
-            for (const answer of result.value.parsed.answers)
-              candidates.set(answer.questionId, {
-                answer,
-                result: result.value.result,
-              });
+                const focusedAssistance = inventory.javaAssistance
+                  .filter((h) => helpIds.has(h.id))
+                  .map((h) =>
+                    branch
+                      ? (({ research: _r, ...rest }) => rest)(h)
+                      : h,
+                  );
+                const analystInventory = branch
+                  ? {
+                      ...compactNotebookContext(a, branch),
+                      jobs: a.jobs,
+                      timing: inventory.timing,
+                      assistanceLinks: inventory.implementation.assistanceLinks,
+                      allAssistanceQuestions: inventory.javaAssistance.map(
+                        (h) => ({ id: h.id, question: h.question }),
+                      ),
+                      availableCheckpointSequences:
+                        inventory.implementation.checkpoints.map((p) => p.seq),
+                    }
+                  : {
+                      events: inventory.events,
+                      jobs: a.jobs,
+                      timing: inventory.timing,
+                      assistanceLinks: inventory.implementation.assistanceLinks,
+                      allAssistanceQuestions: inventory.javaAssistance.map(
+                        (h) => ({ id: h.id, question: h.question }),
+                      ),
+                      availableCheckpointSequences:
+                        inventory.implementation.checkpoints.map((p) => p.seq),
+                      solvingChunks: inventory.solvingChunks,
+                    };
+                const result = await run(
+                  "question-analysis",
+                  questionAnalystPolicy,
+                  {
+                    questions: group,
+                    focusedEvidence: {
+                      finalSource: a.source,
+                      problem: a.problem,
+                      intake,
+                      conversation,
+                      checkpoints: inventory.implementation.checkpoints.filter(
+                        (p) => seqs.has(p.seq),
+                      ),
+                      assistance: focusedAssistance,
+                      annotations: a.annotations,
+                    },
+                    inventory: analystInventory,
+                    additionalEvidencePass: round > 0,
+                  },
+                  z.toJSONSchema(questionAnswersSchema),
+                  (value) => {
+                    const parsed = questionAnswersSchema.parse(value);
+                    exactIds(
+                      parsed.answers.map((x) => x.questionId),
+                      group.map((q) => q.id),
+                      "Answers",
+                    );
+                    for (const answer of parsed.answers)
+                      validateQuestionAnswer(
+                        a,
+                        questions.get(answer.questionId)!,
+                        answer,
+                      );
+                  },
+                  branch
+                    ? { notebook: branch, branchId: `r${round + 1}-b${i + offset + 1}` }
+                    : undefined,
+                );
+                const parsed = questionAnswersSchema.parse(result.value);
+                const urls = new Set([
+                  ...(a.solvingChunks ?? []).flatMap(
+                    (c) => c.sources?.map((s) => s.url) ?? [],
+                  ),
+                  ...(result.research?.sources.map((s) => s.url) ?? []),
+                ]);
+                for (const answer of parsed.answers)
+                  validateQuestionAnswer(
+                    a,
+                    questions.get(answer.questionId)!,
+                    answer,
+                    urls,
+                  );
+                return { parsed, result };
+              }),
+            );
+            for (const branch of branches) nb?.mergeBranch(branch);
+            // Wait for siblings before throwing so diagnostics don't keep orphan work running.
+            for (const result of results) {
+              if (result.status === "rejected") throw result.reason;
+              stageEvidence.push(result.value.result);
+              for (const answer of result.value.parsed.answers)
+                candidates.set(answer.questionId, {
+                  answer,
+                  result: result.value.result,
+                });
+            }
+          } finally {
+            await Promise.all(branches.map((b) => b.close()));
           }
         }
-        const judged = await run(
-          "question-judgment",
-          questionJudgePolicy,
-          {
-            topics: reviewTopics,
-            inventory,
-            questions: [...questions.values()],
-            reviewIds: pending,
-            candidates: [...candidates.values()].map(({ answer }) => answer),
-            previousReviewed: reviewedQuestions(previous),
-            currentReviewed: [...entries.values()].map(
-              ({ question, verdict }) => ({ question, verdict }),
-            ),
-            coverage,
-            evidence: stageEvidence.map((r) => ({
-              traceId: r.traceId,
-              research: r.research,
-              retrievedEvidence: r.retrievedEvidence,
-            })),
-            remainingQuestionBudget: 48 - questions.size,
-            finalCoveragePass: round === 1,
-          },
-          z.toJSONSchema(questionJudgmentOutputSchema),
-          (value) => {
-            const parsed = questionJudgmentOutputSchema.parse(value);
-            if (
-              new Set(parsed.refreshIds).size !== parsed.refreshIds.length ||
-              parsed.refreshIds.some(
-                (id) => !entries.has(id) || pending.includes(id),
-              )
-            )
-              throw Error(
-                "Judge refresh IDs must be existing questions outside the current review batch.",
-              );
-            exactIds(
-              parsed.verdicts.map((v) => v.questionId),
-              pending,
-              "Judgments",
-            );
-            const ids = new Set(questions.keys());
-            for (const q of parsed.missingQuestions) {
-              if (ids.has(q.id))
-                throw Error("A missing question must have a new distinct ID.");
-              ids.add(q.id);
-              validateQuestionRefs(a, q.anchors, new Set());
-            }
-            if (ids.size > 48)
-              throw Error(
-                "Question budget exceeded; report omitted scope in limitations.",
-              );
-            validateCoverage(parsed.coverage, ids);
-            if (
-              (parsed.missingQuestions.length || parsed.refreshIds.length) &&
-              parsed.coverageComplete
-            )
-              throw Error(
-                "Coverage cannot be complete while material questions are missing.",
-              );
-            for (const v of parsed.verdicts) {
-              const q = questions.get(v.questionId)!;
-              validateQuestionAnswer(a, q, v);
+        const judgeBranch = nb
+          ? await nb.fork("question-judgment", `r${round + 1}-judge`)
+          : undefined;
+        let judged: ReviewStageResult;
+        try {
+          const judgeInventory = judgeBranch
+            ? {
+                problem: inventory.problem,
+                finalSource: inventory.finalSource,
+                lastSeq: inventory.lastSeq,
+                implementation: inventory.implementation,
+                jobs: inventory.jobs,
+                annotations: inventory.annotations,
+                timing: inventory.timing,
+                intake: inventory.intake,
+                conversation: inventory.conversation,
+                optimizationDeferredAt: inventory.optimizationDeferredAt,
+                ...compactNotebookContext(a, judgeBranch),
+              }
+            : inventory;
+          judged = await run(
+            "question-judgment",
+            questionJudgePolicy,
+            {
+              topics: reviewTopics,
+              inventory: judgeInventory,
+              questions: [...questions.values()],
+              reviewIds: pending,
+              candidates: [...candidates.values()].map(({ answer }) => answer),
+              previousReviewed: reviewedQuestions(previous),
+              currentReviewed: [...entries.values()].map(
+                ({ question, verdict }) => ({ question, verdict }),
+              ),
+              coverage,
+              evidence: stageEvidence.map((r) => ({
+                traceId: r.traceId,
+                research: r.research,
+                retrievedEvidence: r.retrievedEvidence,
+              })),
+              remainingQuestionBudget: 48 - questions.size,
+              finalCoveragePass: round === 1,
+            },
+            z.toJSONSchema(questionJudgmentOutputSchema),
+            (value) => {
+              const parsed = questionJudgmentOutputSchema.parse(value);
               if (
-                ["reject", "needs-evidence"].includes(v.decision) &&
-                v.disposition === "resolved-internally"
-              )
-                throw Error(
-                  "An unverified answer cannot be resolved internally.",
-                );
-              if (v.decision === "needs-evidence" && v.missingEvidence === "none")
-                throw Error(
-                  "A needs-evidence verdict must identify the missing evidence.",
-                );
-              if (v.decision === "accept" && v.missingEvidence !== "none")
-                throw Error(
-                  "An accepted verdict cannot report blocking missing evidence.",
-                );
-              if (q.kind === "technical" && v.missingEvidence === "learner")
-                throw Error(
-                  "Technical questions cannot depend on unstated learner evidence.",
-                );
-              if (
-                v.disposition === "ask-user" &&
-                (q.kind === "technical" ||
-                  v.missingEvidence === "recording" ||
-                  v.missingEvidence === "technical")
-              )
-                throw Error(
-                  "Research recording and technical uncertainty; do not ask the learner to settle it.",
-                );
-              if (
-                (v.disposition === "superseded") !==
-                (v.coachingRole === "superseded")
-              )
-                throw Error(
-                  "coachingRole=superseded must match disposition=superseded.",
-                );
-              if (
-                v.disposition === "resolved-internally" &&
-                !["worth-sharing", "background"].includes(v.coachingRole)
-              )
-                throw Error(
-                  "Resolved internal findings must use coachingRole worth-sharing or background.",
-                );
-              if (
-                v.coachingRole === "worth-sharing" &&
-                (v.disposition !== "resolved-internally" ||
-                  !["accept", "qualify"].includes(v.decision))
-              )
-                throw Error(
-                  "Only verified resolved-internally findings can be marked worth-sharing.",
-                );
-              if (
-                v.disposition === "ask-user" &&
-                !["blocking-question", "context-question"].includes(
-                  v.coachingRole,
+                new Set(parsed.refreshIds).size !== parsed.refreshIds.length ||
+                parsed.refreshIds.some(
+                  (id) => !entries.has(id) || pending.includes(id),
                 )
               )
                 throw Error(
-                  "ask-user verdicts must use coachingRole blocking-question or context-question.",
+                  "Judge refresh IDs must be existing questions outside the current review batch.",
                 );
+              exactIds(
+                parsed.verdicts.map((v) => v.questionId),
+                pending,
+                "Judgments",
+              );
+              const ids = new Set(questions.keys());
+              for (const q of parsed.missingQuestions) {
+                if (ids.has(q.id))
+                  throw Error("A missing question must have a new distinct ID.");
+                ids.add(q.id);
+                validateQuestionRefs(a, q.anchors, new Set());
+              }
+              if (ids.size > 48)
+                throw Error(
+                  "Question budget exceeded; report omitted scope in limitations.",
+                );
+              validateCoverage(parsed.coverage, ids);
               if (
-                ["blocking-question", "context-question"].includes(
-                  v.coachingRole,
-                ) &&
-                v.disposition !== "ask-user"
+                (parsed.missingQuestions.length || parsed.refreshIds.length) &&
+                parsed.coverageComplete
               )
                 throw Error(
-                  "blocking-question and context-question require disposition=ask-user.",
+                  "Coverage cannot be complete while material questions are missing.",
                 );
-              if (
-                v.disposition === "deferred" &&
-                v.coachingRole !== "background"
-              )
-                throw Error(
-                  "Deferred verdicts must use coachingRole=background.",
-                );
-            }
-          },
-        );
+              for (const v of parsed.verdicts) {
+                const q = questions.get(v.questionId)!;
+                validateQuestionAnswer(a, q, v);
+                if (
+                  ["reject", "needs-evidence"].includes(v.decision) &&
+                  v.disposition === "resolved-internally"
+                )
+                  throw Error(
+                    "An unverified answer cannot be resolved internally.",
+                  );
+                if (
+                  v.decision === "needs-evidence" &&
+                  v.missingEvidence === "none"
+                )
+                  throw Error(
+                    "A needs-evidence verdict must identify the missing evidence.",
+                  );
+                if (v.decision === "accept" && v.missingEvidence !== "none")
+                  throw Error(
+                    "An accepted verdict cannot report blocking missing evidence.",
+                  );
+                if (
+                  q.kind === "technical" &&
+                  v.missingEvidence === "learner"
+                )
+                  throw Error(
+                    "Technical questions cannot depend on unstated learner evidence.",
+                  );
+                if (
+                  v.disposition === "ask-user" &&
+                  (q.kind === "technical" ||
+                    v.missingEvidence === "recording" ||
+                    v.missingEvidence === "technical")
+                )
+                  throw Error(
+                    "Research recording and technical uncertainty; do not ask the learner to settle it.",
+                  );
+                if (
+                  (v.disposition === "superseded") !==
+                  (v.coachingRole === "superseded")
+                )
+                  throw Error(
+                    "coachingRole=superseded must match disposition=superseded.",
+                  );
+                if (
+                  v.disposition === "resolved-internally" &&
+                  !["worth-sharing", "background"].includes(v.coachingRole)
+                )
+                  throw Error(
+                    "Resolved internal findings must use coachingRole worth-sharing or background.",
+                  );
+                if (
+                  v.coachingRole === "worth-sharing" &&
+                  (v.disposition !== "resolved-internally" ||
+                    !["accept", "qualify"].includes(v.decision))
+                )
+                  throw Error(
+                    "Only verified resolved-internally findings can be marked worth-sharing.",
+                  );
+                if (
+                  v.disposition === "ask-user" &&
+                  !["blocking-question", "context-question"].includes(
+                    v.coachingRole,
+                  )
+                )
+                  throw Error(
+                    "ask-user verdicts must use coachingRole blocking-question or context-question.",
+                  );
+                if (
+                  ["blocking-question", "context-question"].includes(
+                    v.coachingRole,
+                  ) &&
+                  v.disposition !== "ask-user"
+                )
+                  throw Error(
+                    "blocking-question and context-question require disposition=ask-user.",
+                  );
+                if (
+                  v.disposition === "deferred" &&
+                  v.coachingRole !== "background"
+                )
+                  throw Error(
+                    "Deferred verdicts must use coachingRole=background.",
+                  );
+              }
+            },
+            judgeBranch
+              ? { notebook: judgeBranch, branchId: `r${round + 1}-judge` }
+              : undefined,
+          );
+          if (judgeBranch) nb?.mergeBranch(judgeBranch);
+        } finally {
+          await judgeBranch?.close();
+        }
         stageEvidence.push(judged);
         const judgment = questionJudgmentOutputSchema.parse(judged.value);
         const urls = new Set([

@@ -13,6 +13,10 @@ import {
   requestJavaSymbol,
   pendingSymbolJobs,
   completeSymbolJob,
+  recordSymbolBridgePoll,
+  hasActiveSymbolBridge,
+  clearSymbolBridgeHeartbeats,
+  browserSymbolsDisabled,
 } from "../lib/agent-symbols";
 import { reflectionFixture } from "../tools/reflection-fixture";
 import { GET, POST } from "../app/api/agent/symbols/route";
@@ -256,6 +260,62 @@ test("LSP jobs bind to exact source and position; stale or mismatched client res
   assert.equal(result.javaProfile, 25);
   assert.equal(pendingSymbolJobs(a.id).length, 0);
   await assert.rejects(requestJavaSymbol(a, args, 1), /unavailable/);
+});
+test("symbol bridge heartbeat TTL, fast-fail, and GET poll promotion", async () => {
+  clearSymbolBridgeHeartbeats();
+  const a = reflectionFixture(),
+    args = { document: "recording", seq: 1, line: 4, column: 16 };
+  assert.equal(hasActiveSymbolBridge(a.id, 10_000, 5_000), false);
+  recordSymbolBridgePoll(a.id, 10_000);
+  assert.equal(hasActiveSymbolBridge(a.id, 14_999, 5_000), true);
+  assert.equal(hasActiveSymbolBridge(a.id, 15_001, 5_000), false);
+  clearSymbolBridgeHeartbeats();
+
+  const startedAt = Date.now();
+  await assert.rejects(
+    requestJavaSymbol(a, args, 20_000, { noBridgeTimeout: 40 }),
+    /unavailable/,
+  );
+  assert.ok(Date.now() - startedAt < 300);
+
+  const pending = requestJavaSymbol(a, args, 1_000, { noBridgeTimeout: 40 });
+  await new Promise((r) => setTimeout(r, 15));
+  const res = await GET(
+    new Request(`http://127.0.0.1:4318/api/agent/symbols?id=${a.id}`, {
+      headers: {
+        host: "127.0.0.1:4318",
+        origin: "http://127.0.0.1:4318",
+      },
+    }),
+  );
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { jobs: Array<{ id: string }> };
+  assert.equal(body.jobs.length, 1);
+  assert.equal(hasActiveSymbolBridge(a.id), true);
+
+  await new Promise((r) => setTimeout(r, 60));
+  const snap = symbolSnapshot(a, args);
+  completeSymbolJob({
+    attemptId: a.id,
+    id: body.jobs[0].id,
+    sourceHash: snap.sourceHash,
+    result: { hover: "void sort(int[])", signatures: null, definition: null },
+  });
+  const resolved = await pending;
+  assert.equal(resolved.hover, "void sort(int[])");
+  clearSymbolBridgeHeartbeats();
+
+  const prevDisable = process.env.DUO_DISABLE_BROWSER_SYMBOLS;
+  try {
+    delete process.env.DUO_DISABLE_BROWSER_SYMBOLS;
+    assert.equal(browserSymbolsDisabled(false), false);
+    assert.equal(browserSymbolsDisabled(true), true);
+    process.env.DUO_DISABLE_BROWSER_SYMBOLS = "1";
+    assert.equal(browserSymbolsDisabled(false), true);
+  } finally {
+    if (prevDisable === undefined) delete process.env.DUO_DISABLE_BROWSER_SYMBOLS;
+    else process.env.DUO_DISABLE_BROWSER_SYMBOLS = prevDisable;
+  }
 });
 test("symbol API rejects foreign origins before accessing pending jobs", async () => {
   for (const method of ["GET", "POST"]) {
