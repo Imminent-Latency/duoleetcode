@@ -32,9 +32,20 @@ export function json(data: unknown, status = 200) {
     },
   });
 }
+export function httpError(message: string, status = 400) {
+  return Object.assign(new Error(message), { status });
+}
 export function failure(error: unknown) {
+  const rawStatus =
+    error && typeof error === "object" && "status" in error
+      ? (error as { status?: unknown }).status
+      : undefined;
+  const status =
+    typeof rawStatus === "number" && rawStatus >= 400 && rawStatus < 600
+      ? rawStatus
+      : 400;
   return json(
     { error: error instanceof Error ? error.message : "Request failed" },
-    400,
+    status,
   );
 }

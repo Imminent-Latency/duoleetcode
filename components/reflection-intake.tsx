@@ -35,7 +35,7 @@ export default function ReflectionIntakeForm({
   const [runtime, setRuntime] = useState("");
   const [requestId, setRequestId] = useState("");
   const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
   const storageKey = `duo-reflection-intake-${attempt.id}`;
   useEffect(() => {
     let saved;
@@ -71,19 +71,35 @@ export default function ReflectionIntakeForm({
       } catch {}
   }, [loaded, requestId, familiarity, space, runtime, storageKey]);
   const complete = loaded && reflectionIntakeSchema.safeParse(answers).success;
+  const hasFamiliarity =
+    loaded && ["new", "revisit", "solved"].includes(familiarity);
   const prepared = attempt.reflection?.analysisReady;
-  const submit = async () => {
+  const submitMode = async (mode: "continue" | "defer" | "skip-coaching") => {
     if (!complete || saving) return;
-    setSaving(true);
+    setSaving(mode);
     try {
-      await onSave({ action: "reflection-intake", answers });
+      await onSave({ action: "reflection-intake", answers, mode });
       try {
         localStorage.removeItem(storageKey);
       } catch {}
     } catch (e) {
       onError(e);
     } finally {
-      setSaving(false);
+      setSaving(null);
+    }
+  };
+  const submitSkipCheckIn = async () => {
+    if (!hasFamiliarity || saving) return;
+    setSaving("skip-checkin");
+    try {
+      await onSave({ action: "skip-checkin", familiarity });
+      try {
+        localStorage.removeItem(storageKey);
+      } catch {}
+    } catch (e) {
+      onError(e);
+    } finally {
+      setSaving(null);
     }
   };
   return (
@@ -106,7 +122,7 @@ export default function ReflectionIntakeForm({
         className="reflection-intake-form"
         onSubmit={(e) => {
           e.preventDefault();
-          void submit();
+          void submitMode("continue");
         }}
       >
         <div className="reflection-intake-fields">
@@ -123,7 +139,7 @@ export default function ReflectionIntakeForm({
                     key={value}
                     value={value}
                     label={label}
-                    disabled={saving}
+                    disabled={!!saving}
                   />
                 ))}
               </Group>
@@ -139,7 +155,7 @@ export default function ReflectionIntakeForm({
               maxLength={5000}
               value={runtime}
               onChange={(e) => setRuntime(e.currentTarget.value)}
-              disabled={saving}
+              disabled={!!saving}
             />
             <Textarea
               label="3. What is your solution’s auxiliary space complexity?"
@@ -152,7 +168,7 @@ export default function ReflectionIntakeForm({
               maxLength={5000}
               value={space}
               onChange={(e) => setSpace(e.currentTarget.value)}
-              disabled={saving}
+              disabled={!!saving}
             />
             <Text size="sm" c="dimmed">
               A brief answer is enough. “I’m not sure” is a valid answer, too.
@@ -183,11 +199,45 @@ export default function ReflectionIntakeForm({
           <Button
             type="submit"
             fullWidth
-            disabled={!complete || saving}
-            loading={saving}
+            disabled={!complete || !!saving}
+            loading={saving === "continue"}
             rightSection={<ArrowRight size={16} />}
           >
             Continue to reflection
+          </Button>
+          <Group grow gap="xs" mt="xs">
+            <Button
+              type="button"
+              variant="light"
+              disabled={!complete || !!saving}
+              loading={saving === "defer"}
+              onClick={() => void submitMode("defer")}
+            >
+              Come back later
+            </Button>
+            <Button
+              type="button"
+              variant="default"
+              disabled={!complete || !!saving}
+              loading={saving === "skip-coaching"}
+              onClick={() => void submitMode("skip-coaching")}
+            >
+              Submit &amp; skip coaching
+            </Button>
+          </Group>
+          <Button
+            type="button"
+            variant="subtle"
+            size="xs"
+            fullWidth
+            mt="xs"
+            disabled={!hasFamiliarity || !!saving}
+            loading={saving === "skip-checkin"}
+            onClick={() => void submitSkipCheckIn()}
+          >
+            {hasFamiliarity
+              ? "Skip check-in (unlock next problem)"
+              : "Select familiarity above to skip check-in"}
           </Button>
         </div>
       </form>

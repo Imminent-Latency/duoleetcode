@@ -74,7 +74,8 @@ export type Problem = {
     params?: { name: string; type: string }[];
     systemdesign?: boolean;
   } | null;
-  topicTags?: { name: string }[];
+  topicTags?: { name: string; slug?: string }[];
+  acRate?: number;
   locked?: boolean;
 };
 export type JudgeJob = {
@@ -267,6 +268,16 @@ export type Attempt = {
   /** Private mid-session milestone notes; reused after sealing to accelerate review. */
   solvingChunks?: import("./solving-chunks").SolvingChunkNote[];
   demonstration?: boolean;
+  prescription?: {
+    id: string;
+    intent?: import("./skill-ratings").PrescriptionIntent;
+    difficultyScore?: number;
+    difficultyModifier?: number;
+    standardMinutes?: number;
+    prescribedMinutes?: number;
+    selectionSpoilerRevealed?: boolean;
+    rated?: boolean;
+  };
   learningExit?: LearningExit;
   previousLearningExits?: LearningExit[];
   reflection?: {
@@ -276,6 +287,10 @@ export type Attempt = {
     preparedReviewAt?: number;
     messages: ReflectionMessage[];
     intake?: ReflectionIntake;
+    /** Explicit 1-tap check-in skip timestamp (`Skip check-in`). */
+    checkInSkippedAt?: number;
+    /** True when the learner chose `Come back later` so coaching stays queued without blocking the next session. */
+    coachingDeferred?: boolean;
     /** Private preliminary analysis; never shown before the learner answers. */
     analysis?: Evaluation;
     /** Public readiness flag; analysis content stays on the server. */

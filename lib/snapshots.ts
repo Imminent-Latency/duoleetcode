@@ -14,6 +14,8 @@ import path from "node:path";
 import type { AttemptStore } from "./store";
 import type { Attempt } from "./types";
 import { evidenceFromAttempt } from "./learner-memory";
+import { mergeRatingSnapshots, type RatingLedgerSnapshot } from "./skill-ratings";
+import type { RatingLibrarySnapshot } from "./rating-store";
 import { workSegments } from "./work-segments";
 import { lowSettings } from "./agent-settings";
 import { validateSnapshot, operationSchema } from "./snapshot-schema";
@@ -73,6 +75,7 @@ export function parseSnapshot(raw: unknown): SnapshotArchive {
           ...(legacy.learnerMemory ?? emptyMemory),
           suppressed: legacy.learnerMemory?.suppressed ?? [],
         },
+        ...(legacy.ratings ? { ratings: legacy.ratings } : {}),
       },
       sandbox: { attempts: [], importedEvidence: [], memory: emptyMemory },
       settings: null,
@@ -93,6 +96,7 @@ export function captureLibrary(store: AttemptStore): LibraryImage {
     attempts: store.snapshotRecords(),
     importedEvidence: store.imported(),
     memory: store.memory.export() as unknown as LibraryImage["memory"],
+    ratings: store.ratings.exportSnapshot(),
   });
 }
 export function captureSnapshot(
@@ -415,6 +419,40 @@ function projectLibrary(
     false,
     initialCounts(),
   ).filter((e) => !present.has(e.id));
+  if (restore) {
+    const incomingRatings: RatingLedgerSnapshot = {
+      launches: (source.ratings?.launches ?? []).filter((l) => attemptIds.has(l.attemptId)),
+      ratingJobs: (source.ratings?.ratingJobs ?? []).filter((j) => attemptIds.has(j.attemptId)),
+      ratingEvents: (source.ratings?.ratingEvents ?? []).filter((e) => attemptIds.has(e.attemptId)),
+    };
+    const baseRatings: RatingLedgerSnapshot = out.ratings ?? {
+      launches: [],
+      ratingJobs: [],
+      ratingEvents: [],
+    };
+    const merged = mergeRatingSnapshots(baseRatings, incomingRatings, replace);
+    out.ratings = {
+      ...merged,
+      preferences: selection.preferences
+        ? replace
+          ? (source.ratings?.preferences ?? out.ratings?.preferences)
+          : (out.ratings?.preferences ?? source.ratings?.preferences)
+        : out.ratings?.preferences,
+      onboarding: replace
+        ? (source.ratings?.onboarding ?? out.ratings?.onboarding)
+        : (out.ratings?.onboarding ?? source.ratings?.onboarding),
+    };
+  } else if (op.attemptMode === "whole" && out.ratings) {
+    out.ratings = {
+      ...out.ratings,
+      launches: out.ratings.launches.filter((l) => !attemptIds.has(l.attemptId)),
+      ratingJobs: out.ratings.ratingJobs.filter((j) => !attemptIds.has(j.attemptId)),
+      ratingEvents: out.ratings.ratingEvents.filter((e) => !attemptIds.has(e.attemptId)),
+      ...(selection.preferences
+        ? { preferences: { focusDomains: [], mutedDomains: [] } }
+        : {}),
+    };
+  }
   return out;
 }
 export function projectOperation(
@@ -585,6 +623,7 @@ export function replaceLibrary(store: AttemptStore, image: LibraryImage) {
     db.prepare("INSERT INTO memory_uses VALUES(?,?,?)").run(u.id, u.at, u.data);
   for (const e of m.suppressed)
     db.prepare("INSERT INTO evidence_suppression VALUES(?)").run(e.id);
+  store.ratings.replaceSnapshot(image.ratings);
 }
 export function assertIdle(practice: AttemptStore, sandbox: AttemptStore) {
   const shared = globalThis as typeof globalThis & {

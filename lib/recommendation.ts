@@ -1,30 +1,38 @@
 import type { Attempt } from "./types";
+import { nextAssessmentGate } from "./skill-ratings";
+
 export function recommend(history: Attempt[]) {
-  const active = history.find(
-    (a) => a.phase === "active" || a.phase === "paused",
-  );
-  if (active)
+  const gate = nextAssessmentGate(history);
+  if (gate.allowed || !gate.blockingAttemptId) return null;
+  if (gate.reason === "active-attempt") {
     return {
       title: "Resume your assessment",
-      slug: active.problem.titleSlug,
-      reason:
-        "Your current attempt is saved. Return to it before starting a new session.",
-      kind: "continue",
-      basedOn: active.id,
+      slug: gate.slug ?? "",
+      reason: gate.message!,
+      kind: "continue" as const,
+      gateReason: gate.reason,
+      basedOn: gate.blockingAttemptId,
       revisitAt: Date.now(),
     };
-  const unfinished = history.find(
-    (a) => a.phase === "review" || a.phase === "learn",
-  );
-  if (unfinished)
+  }
+  if (gate.reason === "unsettled-checkin") {
     return {
-      title: "Finish your learning loop",
-      slug: unfinished.problem.titleSlug,
-      reason:
-        "Return to your saved review or conversation. You can also skip coaching and move on.",
-      kind: "continue",
-      basedOn: unfinished.id,
+      title: "Finish your quick check-in",
+      slug: gate.slug ?? "",
+      reason: gate.message!,
+      kind: "continue" as const,
+      gateReason: gate.reason,
+      basedOn: gate.blockingAttemptId,
       revisitAt: Date.now(),
     };
-  return null;
+  }
+  return {
+    title: "Finish your learning loop",
+    slug: gate.slug ?? "",
+    reason: gate.message!,
+    kind: "continue" as const,
+    gateReason: gate.reason,
+    basedOn: gate.blockingAttemptId,
+    revisitAt: Date.now(),
+  };
 }

@@ -5,18 +5,21 @@ import {
   ArrowUpRight,
   BookOpen,
   Code2,
+  Eye,
   LoaderCircle,
   RefreshCw,
   Sparkles,
   Timer,
 } from "lucide-react";
 import { Button, Panel } from "./ui";
-import ReviewFlagButton from "./review-flag";
 import CoachText from "./coach-text";
+import PrescriptionCoachDrawer from "./prescription-coach";
+import type { RatingsProfileDto } from "./skill-profile";
 import { api, bridge } from "@/lib/browser";
 import { languageConfig, type LanguageId } from "@/lib/languages";
 import type { BridgeConnection } from "@/lib/leetcode-bridge";
-import type { PrescriptionStatus } from "@/lib/prescription-types";
+import type { Prescription, PrescriptionStatus } from "@/lib/prescription-types";
+import type { PrescriptionOverrideInput } from "@/lib/skill-ratings";
 
 export function useProblemPrescription(
   enabled: boolean,
@@ -24,6 +27,7 @@ export function useProblemPrescription(
   connected: boolean,
   signedIn: boolean,
   language: LanguageId = "java",
+  isPremium = false,
 ) {
   const [status, setStatus] = useState<PrescriptionStatus>({});
   const [error, setError] = useState("");
@@ -31,12 +35,18 @@ export function useProblemPrescription(
   const automatic = useRef<string | undefined>(undefined);
   const handled = useRef(new Set<string>());
   const start = useCallback(
-    async (another = false) => {
+    async (another = false, override?: PrescriptionOverrideInput) => {
       setError("");
       setStarting(true);
       try {
         setStatus(
-          await api("/api/prescription", { action: "start", another, language }),
+          await api("/api/prescription", {
+            action: "start",
+            another,
+            language,
+            isPremium,
+            ...(override ? { override } : {}),
+          }),
         );
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -44,16 +54,16 @@ export function useProblemPrescription(
         setStarting(false);
       }
     },
-    [language],
+    [language, isPremium],
   );
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    void api(`/api/prescription?language=${language}`)
+    void api(`/api/prescription?language=${language}&isPremium=${isPremium}`)
       .then((data: PrescriptionStatus) => {
         if (!live) return;
         setStatus(data);
-        const key = `${revision}:${language}`;
+        const key = `${revision}:${language}:${isPremium}`;
         if (
           !data.prescription &&
           data.job?.state !== "running" &&
@@ -71,7 +81,7 @@ export function useProblemPrescription(
     return () => {
       live = false;
     };
-  }, [enabled, revision, connected, signedIn, language, start]);
+  }, [enabled, revision, connected, signedIn, language, isPremium, start]);
 
   // Runs at workspace level, so browsing other app views doesn't interrupt catalog tools.
   useEffect(() => {
@@ -81,7 +91,7 @@ export function useProblemPrescription(
     const poll = async () => {
       try {
         const data: PrescriptionStatus = await api(
-          `/api/prescription?language=${language}`,
+          `/api/prescription?language=${language}&isPremium=${isPremium}`,
         );
         if (!live) return;
         setStatus(data);
@@ -128,9 +138,10 @@ export function useProblemPrescription(
       live = false;
       clearTimeout(timer);
     };
-  }, [status.job?.id, status.job?.state, language]);
+  }, [status.job?.id, status.job?.state, language, isPremium]);
   return {
     status,
+    setStatus,
     error: error || status.job?.error || "",
     busy: starting || status.job?.state === "running",
     start,
@@ -140,7 +151,9 @@ export function useProblemPrescription(
 export default function ProblemPrescription({
   controller,
   language = "java",
+  isPremium = false,
   continuation,
+  gate,
   ready,
   bridgeConnection,
   agentSignedIn,
@@ -153,31 +166,65 @@ export default function ProblemPrescription({
 }: {
   controller: ReturnType<typeof useProblemPrescription>;
   language?: LanguageId;
-  continuation?: { title: string; reason: string; basedOn: string } | null;
+  isPremium?: boolean;
+  continuation?: {
+    title: string;
+    reason: string;
+    basedOn: string;
+    gateReason?: string;
+  } | null;
+  gate?: RatingsProfileDto["gate"];
   ready: boolean;
   bridgeConnection?: BridgeConnection;
   agentSignedIn?: boolean;
   disabled: boolean;
   onOpen: (id: string) => void;
-  onChoose: (slug: string, minutes: number) => void;
+  onChoose: (slug: string, minutes: number, prescription?: Prescription) => void;
   onBrowse: () => void;
   onConnect: () => void;
   onBridgeAction?: () => void;
 }) {
-  const { status, error, busy, start } = controller;
+  const { status, setStatus, error, busy, start } = controller;
   const p = status.prescription;
   const cfg = languageConfig(p?.language ?? language);
   const loading = busy && !continuation;
+  const [spoilerRevealedId, setSpoilerRevealedId] = useState<string | null>(null);
+  const isSelectionTarget = p?.intent?.targetFacet === "selection";
+  const spoilerUnlocked =
+    !isSelectionTarget ||
+    Boolean(p?.selectionSpoilerRevealed) ||
+    spoilerRevealedId === p?.id;
   const needsLeetCodeLogin =
     !ready &&
     agentSignedIn !== false &&
     (bridgeConnection?.kind === "signed-out" ||
       bridgeConnection?.kind === "verification-required");
+
+  const revealSpoiler = async () => {
+    if (!p) return;
+    setSpoilerRevealedId(p.id);
+    setStatus((curr) =>
+      curr.prescription?.id === p.id
+        ? {
+            ...curr,
+            prescription: { ...curr.prescription, selectionSpoilerRevealed: true },
+          }
+        : curr,
+    );
+    await api("/api/prescription", {
+      action: "reveal-spoiler",
+      prescriptionId: p.id,
+    }).catch(() => {});
+  };
+
   return (
     <Panel className="recommendation-card prescription-card">
       <div className="card-topline">
         <span className="pill mint">
-          <Sparkles size={13} /> YOUR NEXT STEP
+          <Sparkles size={13} />{" "}
+          {continuation?.gateReason === "unsettled-checkin"
+            ? "CHECK-IN REQUIRED"
+            : "YOUR NEXT STEP"}
         </span>
         <span className="text-muted">01 / PRACTICE</span>
       </div>
@@ -190,10 +237,13 @@ export default function ProblemPrescription({
       <p className="recommendation-description">
         {continuation?.reason ??
           (loading
-            ? "Matching your practice evidence with a manageable problem from LeetCode."
+            ? status.job?.stage || "Matching your skill profile with a timed problem from LeetCode."
             : (p?.reason ??
-              `Your practice history helps choose one useful, timed ${cfg.shortLabel} challenge.`))}
+              `Your skill profile helps choose one useful, timed ${cfg.shortLabel} challenge.`))}
       </p>
+      {!continuation && !loading && p?.overrideWarning && (
+        <p className="small">{p.overrideWarning}</p>
+      )}
       {loading ? (
         <p className="prescription-status" role="status">
           <LoaderCircle className="spin" size={17} />{" "}
@@ -214,43 +264,57 @@ export default function ProblemPrescription({
                 {p.kind === "revisit" ? "Useful revisit" : "Next challenge"}
               </span>
             </div>
-            <details className="prescription-evidence">
-              <summary>Why this problem?</summary>
-              <p>
-                Chosen using your saved practice evidence. You can correct these
-                observations in Coach memory.
-              </p>
-              {p.evidence.map((e) => (
-                <div key={e.id} className="prescription-observation">
-                  <strong>{e.skill}</strong>
-                  <CoachText>{e.observation}</CoachText>
-                  <p className="small">{e.support}</p>
-                  {e.correction && <p>Your correction: {e.correction}</p>}
-                  {e.url && /^https?:\/\//.test(e.url) ? (
-                    <a href={e.url} target="_blank" rel="noreferrer">
-                      Open source · {e.source}
-                    </a>
-                  ) : e.attemptId ? (
-                    <Button
-                      className="text-button"
-
-                      onClick={() => onOpen(e.attemptId!)}
-                    >
-                      View recorded attempt
-                    </Button>
-                  ) : (
-                    <span className="small">{e.source}</span>
-                  )}
-                </div>
-              ))}
-              {!p.evidence.length && (
-                <p>A starting assessment to collect your first evidence.</p>
-              )}
-              <p className="small">
-                {p.model} · {p.effort} effort · {cfg.shortLabel} and access checked on
-                LeetCode
-              </p>
-            </details>
+            {spoilerUnlocked ? (
+              <details className="prescription-evidence">
+                <summary>Why this problem?</summary>
+                <p>
+                  Chosen using your skill trajectory and saved evidence. You can
+                  correct observations in Coach memory.
+                </p>
+                {p.evidence.map((e) => (
+                  <div key={e.id} className="prescription-observation">
+                    <strong>{e.skill}</strong>
+                    <CoachText>{e.observation}</CoachText>
+                    <p className="small">{e.support}</p>
+                    {e.correction && <p>Your correction: {e.correction}</p>}
+                    {e.url && /^https?:\/\//.test(e.url) ? (
+                      <a href={e.url} target="_blank" rel="noreferrer">
+                        Open source · {e.source}
+                      </a>
+                    ) : e.attemptId ? (
+                      <Button
+                        className="text-button"
+                        onClick={() => onOpen(e.attemptId!)}
+                      >
+                        View recorded attempt
+                      </Button>
+                    ) : (
+                      <span className="small">{e.source}</span>
+                    )}
+                  </div>
+                ))}
+                {!p.evidence.length && (
+                  <p>Calibrating your ratings with a clean independent challenge.</p>
+                )}
+                <p className="small">
+                  {p.model} · {p.effort} effort · {cfg.shortLabel} and access checked on
+                  LeetCode
+                </p>
+              </details>
+            ) : (
+              <div className="prescription-spoiler-gate">
+                <span className="small">
+                  Pattern Selection challenge — the target domain is hidden so you
+                  can diagnose the strategy yourself.
+                </span>
+                <Button
+                  className="text-button"
+                  onClick={() => void revealSpoiler()}
+                >
+                  <Eye size={14} /> Reveal why this was chosen (disables Pattern Selection rating)
+                </Button>
+              </div>
+            )}
           </>
         )
       )}
@@ -279,13 +343,23 @@ export default function ProblemPrescription({
             disabled={disabled}
             onClick={() => onOpen(continuation.basedOn)}
           >
-            Continue your session <ArrowRight size={17} />
+            {gate?.reason === "unsettled-checkin"
+              ? "Finish your quick check-in"
+              : "Continue your session"}{" "}
+            <ArrowRight size={17} />
           </Button>
         ) : p && !loading && bridgeConnection?.isSignedIn ? (
           <Button
             className="button primary"
             disabled={disabled}
-            onClick={() => onChoose(p.slug, p.minutes)}
+            onClick={() =>
+              onChoose(p.slug, p.minutes, {
+                ...p,
+                selectionSpoilerRevealed: Boolean(
+                  p.selectionSpoilerRevealed || spoilerRevealedId === p.id,
+                ),
+              })
+            }
           >
             Prepare session <ArrowRight size={17} />
           </Button>
@@ -322,7 +396,6 @@ export default function ProblemPrescription({
           {p && (
             <Button
               className="text-button"
-
               disabled={loading || disabled || !ready}
               onClick={() => void start(true)}
             >
@@ -331,37 +404,34 @@ export default function ProblemPrescription({
           )}
           <Button
             className="text-button"
-
             disabled={disabled}
             onClick={onBrowse}
           >
             <BookOpen size={14} /> Browse problems
           </Button>
+          {ready && (
+            <PrescriptionCoachDrawer
+              language={language}
+              isPremium={isPremium}
+              currentSlug={p?.slug}
+              disabled={loading || disabled}
+              onQuickOverride={async (ov) => {
+                await start(false, ov);
+              }}
+              onCoachApplied={(nextStatus) => {
+                if (nextStatus) setStatus(nextStatus);
+              }}
+            />
+          )}
           {error && !loading && ready && (
             <Button
               className="text-button"
-
               onClick={() => void start(!!p)}
             >
               Try again
             </Button>
           )}
         </div>
-      )}
-      {!continuation && p && (
-        <ReviewFlagButton
-          target={{ kind: "prescription", prescriptionId: p.id }}
-        />
-      )}
-      {(p?.traceId || status.job?.traceId) && (
-        <a
-          className="agent-trace-link"
-          href={`/?trace=${p?.traceId ?? status.job?.traceId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Inspect problem selection
-        </a>
       )}
     </Panel>
   );

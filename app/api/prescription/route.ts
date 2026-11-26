@@ -2,19 +2,35 @@ import { z } from "zod";
 import { database } from "@/lib/store";
 import { localRequest, json, failure } from "@/lib/http";
 import {
-  prescriptionStatus,
-  startPrescription,
   answerCatalogRequest,
+  coachPrescription,
+  prescriptionStatus,
+  revealPrescriptionSpoiler,
+  startPrescription,
 } from "@/lib/prescription";
 import { sandboxMode } from "@/lib/practice-storage.mjs";
 import { languageIdSchema, normalizeLanguage } from "@/lib/languages";
+import { domainIdSchema } from "@/lib/prescription-types";
 export const runtime = "nodejs";
+const overrideSchema = z
+  .object({
+    domainOverride: domainIdSchema.optional(),
+    domainPoolOverride: z.array(domainIdSchema).min(2).max(5).optional(),
+    slotOverride: z
+      .enum(["easy-reinforcement", "growth", "consolidation", "breadth", "stretch"])
+      .optional(),
+    maxMinutes: z.number().int().min(10).max(45).optional(),
+    excludeSlug: z.string().regex(/^[a-z0-9-]+$/).optional(),
+  })
+  .strict();
 const bodySchema = z.discriminatedUnion("action", [
   z
     .object({
       action: z.literal("start"),
       another: z.boolean().default(false),
       language: languageIdSchema.default("java"),
+      isPremium: z.boolean().default(false),
+      override: overrideSchema.optional(),
     })
     .strict(),
   z
@@ -26,14 +42,28 @@ const bodySchema = z.discriminatedUnion("action", [
       error: z.string().max(2000).optional(),
     })
     .strict(),
+  z
+    .object({
+      action: z.literal("coach"),
+      message: z.string().trim().min(1).max(2000),
+      language: languageIdSchema.default("java"),
+      isPremium: z.boolean().default(false),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("reveal-spoiler"),
+      prescriptionId: z.string().uuid(),
+    })
+    .strict(),
 ]);
 export async function GET(req: Request) {
   try {
     localRequest(req);
-    const lang = normalizeLanguage(
-      new URL(req.url).searchParams.get("language"),
-    );
-    return json(prescriptionStatus(database(), undefined, lang));
+    const url = new URL(req.url);
+    const lang = normalizeLanguage(url.searchParams.get("language"));
+    const isPremium = url.searchParams.get("isPremium") === "true";
+    return json(prescriptionStatus(database(), undefined, lang, isPremium));
   } catch (e) {
     return failure(e);
   }
@@ -52,7 +82,22 @@ export async function POST(req: Request) {
     localRequest(req);
     const db = database();
     if (body.action === "start")
-      return json(startPrescription(db, body.another, undefined, body.language));
+      return json(
+        startPrescription(
+          db,
+          body.another,
+          { isPremium: body.isPremium, override: body.override },
+          body.language,
+        ),
+      );
+    if (body.action === "coach")
+      return json(
+        await coachPrescription(db, body.message, body.language, body.isPremium),
+      );
+    if (body.action === "reveal-spoiler") {
+      revealPrescriptionSpoiler(db, body.prescriptionId);
+      return json({ ok: true });
+    }
     answerCatalogRequest(db, body.jobId, body.requestId, body.data, body.error);
     return json({ ok: true });
   } catch (e) {

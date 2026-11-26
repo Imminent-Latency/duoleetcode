@@ -8,7 +8,8 @@ import {
 import type { AttemptStore } from "./store";
 import type { Attempt, ReplayFocus } from "./types";
 import type { QuestionReview } from "./question-review";
-import { intakeMessage, reflectionIntakeSchema } from "./reflection-intake";
+import { reflectionIntakeSchema, intakeMessage } from "./reflection-intake";
+import { kickoffBackgroundRatingDrain } from "./rating-worker";
 import {
   pendingReflection,
   validateReflection,
@@ -41,14 +42,17 @@ function checkpointReview(db: AttemptStore, a: Attempt) {
   };
 }
 
+export type CheckInMode = "continue" | "defer" | "skip-coaching";
+
 export function saveReflectionIntake(
   db: AttemptStore,
   id: string,
   input: unknown,
   now = Date.now(),
+  mode: CheckInMode = "continue",
 ) {
   const answer = reflectionIntakeSchema.parse(input);
-  return db.transaction(() => {
+  const updated = db.transaction(() => {
     const a = db.get(id);
     if (a.phase !== "review" || !a.sealed)
       throw new Error(
@@ -62,8 +66,18 @@ export function saveReflectionIntake(
         previous.familiarity === answer.familiarity &&
         previous.spaceComplexity === answer.spaceComplexity &&
         previous.timeComplexity === answer.timeComplexity
-      )
+      ) {
+        if (mode === "defer") a.reflection.coachingDeferred = true;
+        else if (mode === "skip-coaching") {
+          a.reflection.coachingDeferred = false;
+          a.phase = "complete";
+          a.learningExit = { reason: "skipped", at: now };
+        } else {
+          a.reflection.coachingDeferred = false;
+        }
+        db.save(a);
         return a;
+      }
       throw new Error(
         "Your initial reflection is already saved. Add corrections in the conversation.",
       );
@@ -73,6 +87,7 @@ export function saveReflectionIntake(
         "This conversation has already started. Add your context in the chat.",
       );
     a.reflection.intake = { ...answer, submittedAt: now };
+    a.reflection.coachingDeferred = mode === "defer";
     a.exposure = answer.familiarity;
     a.exposureSource = "reported";
     a.exposureUpdatedAt = now;
@@ -83,9 +98,54 @@ export function saveReflectionIntake(
       text: intakeMessage(answer),
       createdAt: now,
     });
+    if (mode === "skip-coaching") {
+      a.phase = "complete";
+      a.learningExit = { reason: "skipped", at: now };
+    }
     db.save(a);
+    if (!a.demonstration) db.ratings.enqueueRatingJob(a.id, now);
     return a;
   });
+  kickoffBackgroundRatingDrain(db);
+  return updated;
+}
+
+export function skipReflectionCheckIn(
+  db: AttemptStore,
+  id: string,
+  familiarity: "new" | "revisit" | "solved",
+  now = Date.now(),
+) {
+  if (!["new", "revisit", "solved"].includes(familiarity)) {
+    throw new Error("Choose your prior familiarity before skipping check-in.");
+  }
+  const updated = db.transaction(() => {
+    const a = db.get(id);
+    if (a.phase !== "review" || !a.sealed) {
+      throw new Error("Finish and save the assessment before settling check-in.");
+    }
+    a.reflection ??= { messages: [] };
+    if (a.reflection.intake) {
+      a.reflection.coachingDeferred = false;
+      a.phase = "complete";
+      a.learningExit = { reason: "skipped", at: now };
+      db.save(a);
+      if (!a.demonstration) db.ratings.enqueueRatingJob(a.id, now);
+      return a;
+    }
+    a.reflection.checkInSkippedAt = now;
+    a.reflection.coachingDeferred = false;
+    a.exposure = familiarity;
+    a.exposureSource = "reported";
+    a.exposureUpdatedAt = now;
+    a.phase = "complete";
+    a.learningExit = { reason: "skipped", at: now };
+    db.save(a);
+    if (!a.demonstration) db.ratings.enqueueRatingJob(a.id, now);
+    return a;
+  });
+  kickoffBackgroundRatingDrain(db);
+  return updated;
 }
 
 export async function prepareReflection(
@@ -187,6 +247,7 @@ export async function continueReflection(
   if (!["review", "learn"].includes(a.phase) || !a.sealed)
     throw new Error("Open reflection after finishing the assessment.");
   a.reflection ??= { messages: [] };
+  a.reflection.coachingDeferred = false;
   const phase = a.phase;
   const session = a.previousLearningExits?.length ?? 0;
   if (message) {

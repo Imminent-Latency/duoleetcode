@@ -10,6 +10,15 @@ import { historySeed } from "./history-seed";
 import { LearnerMemory } from "./learner-memory";
 import { applyEdits, sameEvent } from "./recording";
 import { closeLearning } from "./coaching";
+import { RatingStore } from "./rating-store";
+import {
+  canTransitionToComplete,
+  problemBaseDifficulty,
+  resolvePrimaryDomain,
+  standardMinutes,
+  tagToSlug,
+  type PrescriptionIntent,
+} from "./skill-ratings";
 import {
   attemptLanguage,
   languageConfig,
@@ -22,6 +31,7 @@ import type { Attempt, AttemptSummary, EvidenceEvent, Problem } from "./types";
 export class AttemptStore {
   db: DatabaseSync;
   memory: LearnerMemory;
+  ratings: RatingStore;
   constructor(
     filename = practiceFile(),
     private readonly isSandbox = false,
@@ -39,7 +49,7 @@ export class AttemptStore {
     const version = Number(
       this.db.prepare("PRAGMA user_version").get()?.user_version,
     );
-    if (version > 3)
+    if (version > 4)
       throw new Error("This practice database requires a newer app version.");
     if (version < 1)
       this.transaction(() =>
@@ -59,13 +69,15 @@ export class AttemptStore {
       this.db.prepare("INSERT INTO library_meta VALUES('seeded','true')").run();
     }
     this.memory = new LearnerMemory(this.db, isSandbox);
+    this.ratings = new RatingStore(this.db, isSandbox);
     this.transaction(() => {
       this.memory.initialize();
+      this.ratings.initialize();
       if (version < 3) {
         this.memory.indexImported(this.imported());
         for (const a of this.records()) this.memory.indexAttempt(a);
       }
-      this.db.exec("PRAGMA user_version=3");
+      this.db.exec("PRAGMA user_version=4");
     });
   }
   imported() {
@@ -101,6 +113,7 @@ export class AttemptStore {
         attempts: rows.map((a) => this.loadRecording(a)),
         importedEvidence: this.imported(),
         learnerMemory: this.memory.export(),
+        ratings: this.ratings.exportSnapshot(),
       };
       this.db.exec("COMMIT");
       return data;
@@ -167,6 +180,16 @@ export class AttemptStore {
     demonstration = false,
     now = Date.now(),
     language: LanguageId = "java",
+    launchMeta?: {
+      prescriptionId?: string;
+      intent?: PrescriptionIntent;
+      difficultyScore?: number;
+      difficultyModifier?: number;
+      standardMinutes?: number;
+      prescribedMinutes?: number;
+      selectionSpoilerRevealed?: boolean;
+      rated?: boolean;
+    },
   ): Attempt {
     demonstration ||= this.isSandbox;
     const starter = starterForLanguage(problem, language);
@@ -197,6 +220,21 @@ export class AttemptStore {
           )[0];
     const remembered =
       previous?.exposure === "revisit" || previous?.exposure === "solved";
+    const diff =
+      problem.difficulty === "Easy" ||
+      problem.difficulty === "Medium" ||
+      problem.difficulty === "Hard"
+        ? problem.difficulty
+        : "Medium";
+    const tagSlugs = (problem.topicTags ?? []).map(tagToSlug);
+    const provisionalDomain = resolvePrimaryDomain(problem.titleSlug, tagSlugs);
+    const baseDiff =
+      launchMeta?.difficultyScore ??
+      problemBaseDifficulty(diff, problem.acRate ?? 55, launchMeta?.difficultyModifier ?? 0);
+    const stdMin = launchMeta?.standardMinutes ?? standardMinutes(baseDiff);
+    const chosenMin = Math.round(budgetMs / 60_000);
+    const prescribed = Boolean(launchMeta?.prescriptionId && launchMeta?.intent);
+    const rated = Boolean(!demonstration && prescribed && (launchMeta?.rated ?? true));
     const a: Attempt = {
       id: randomUUID(),
       language,
@@ -218,8 +256,45 @@ export class AttemptStore {
       evaluations: [],
       annotations: [],
       demonstration,
+      ...(prescribed && launchMeta
+        ? {
+            prescription: {
+              id: launchMeta.prescriptionId!,
+              intent: launchMeta.intent,
+              difficultyScore: baseDiff,
+              difficultyModifier: launchMeta.difficultyModifier ?? 0,
+              standardMinutes: stdMin,
+              prescribedMinutes: launchMeta.prescribedMinutes ?? chosenMin,
+              selectionSpoilerRevealed: Boolean(launchMeta.selectionSpoilerRevealed),
+              rated,
+            },
+          }
+        : {}),
     };
-    this.save(a);
+    this.db.exec("SAVEPOINT create_attempt");
+    try {
+      this.save(a);
+      if (!demonstration) {
+        this.ratings.recordLaunch({
+          attemptId: a.id,
+          startedAt: now,
+          prescribed,
+          rated,
+          language,
+          provisionalDomain,
+          difficultyScore: baseDiff,
+          difficultyModifier: launchMeta?.difficultyModifier ?? 0,
+          standardMinutes: stdMin,
+          prescribedMinutes: launchMeta?.prescribedMinutes ?? chosenMin,
+          intent: launchMeta?.intent,
+          selectionSpoilerRevealed: Boolean(launchMeta?.selectionSpoilerRevealed),
+        });
+      }
+      this.db.exec("RELEASE create_attempt");
+    } catch (error) {
+      this.db.exec("ROLLBACK TO create_attempt; RELEASE create_attempt");
+      throw error;
+    }
     return a;
   }
   recordContinuation(
@@ -388,6 +463,10 @@ export class AttemptStore {
         delete a.learningExit;
         a.phase = "learn";
       } else if (action === "complete") {
+        if (!canTransitionToComplete(a))
+          throw new Error(
+            "Complete or skip the quick check-in before moving on.",
+          );
         closeLearning(a, exitReason, now);
       } else if (!(
         (action === "pause" && a.phase === "paused") ||

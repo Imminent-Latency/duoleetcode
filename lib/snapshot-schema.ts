@@ -118,6 +118,8 @@ const attempt = z
         questionReview: questionReviewSchema.optional(),
         preparedReviewAt: number.optional(),
         analysisReady: z.boolean().optional(),
+        checkInSkippedAt: number.optional(),
+        coachingDeferred: z.boolean().optional(),
       })
       .passthrough()
       .optional(),
@@ -217,6 +219,27 @@ const memory = z.object({
   uses: z.array(z.object({ id, at: number, data: text })),
   suppressed: z.array(z.object({ id })).default([]),
 });
+const ratingsSnapshot = z
+  .object({
+    launches: z.array(z.record(z.string(), z.unknown())),
+    ratingJobs: z.array(z.record(z.string(), z.unknown())),
+    ratingEvents: z.array(z.record(z.string(), z.unknown())),
+    preferences: z
+      .object({
+        focusDomains: z.array(z.string()),
+        mutedDomains: z.array(z.string()),
+        maxMinutes: z.number().optional(),
+      })
+      .optional(),
+    onboarding: z
+      .object({
+        startingTier: z.enum(["foundations", "interview-prep", "experienced"]),
+        welcomeDismissed: z.boolean(),
+      })
+      .optional(),
+  })
+  .passthrough()
+  .optional();
 const library = z.object({
   attempts: z.array(attempt).max(10000),
   importedEvidence: z.array(
@@ -231,6 +254,7 @@ const library = z.object({
       .passthrough(),
   ),
   memory,
+  ratings: ratingsSnapshot,
 });
 const browser = z.record(
   z.string().refine(isBrowserDataKey, "Unrecognized browser preference"),

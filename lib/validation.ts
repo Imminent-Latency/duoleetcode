@@ -54,9 +54,10 @@ export const problemSchema = z.object({
     .nullable()
     .optional(),
   topicTags: z
-    .array(z.object({ name: z.string().max(100) }))
+    .array(z.object({ name: z.string().max(100), slug: z.string().max(100).optional() }))
     .max(50)
     .optional(),
+  acRate: z.number().min(0).max(100).optional(),
   locked: z.boolean().optional(),
 });
 export const jobSchema = z.object({

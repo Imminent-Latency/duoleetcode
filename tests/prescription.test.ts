@@ -21,16 +21,28 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { advanceGeneration } from "../lib/data-environment";
 const choice = { model: "fixture-planner", effort: "low" };
-const candidate = {
+
+const problem = {
+  ...demoProblem,
+  title: "Contains Duplicate",
+  titleSlug: "contains-duplicate",
+  difficulty: "Easy",
+  isPaidOnly: false,
+  acRate: 63,
+  topicTags: [{ name: "Hash Table", slug: "hash-table" }],
+  questionId: "217",
+  questionFrontendId: "217",
+  locked: false,
+};
+
+const altProblem = {
+  ...demoProblem,
   title: "Ransom Note",
   titleSlug: "ransom-note",
   difficulty: "Easy",
   isPaidOnly: false,
-  topicTags: [{ name: "String" }],
-};
-const problem = {
-  ...demoProblem,
-  ...candidate,
+  acRate: 64,
+  topicTags: [{ name: "Hash Table", slug: "hash-table" }],
   questionId: "383",
   questionFrontendId: "383",
   locked: false,
@@ -41,19 +53,18 @@ type Run = NonNullable<
 >;
 const validRun: Run = async (input: any, tools, selectedChoice) => {
   assert.deepEqual(selectedChoice, choice);
-  await tools.handle("search_problems", {
-    search: "ransom",
-    difficulty: "EASY",
-    skip: 0,
-  });
-  await tools.handle("inspect_problem", { slug: candidate.titleSlug });
+  assert.ok(Array.isArray(input.shortlist) && input.shortlist.length > 0);
+  const pick = input.shortlist[0];
+  await tools.handle("inspect_problem", { slug: pick.slug });
   return {
     value: {
-      slug: candidate.titleSlug,
+      slug: pick.slug,
       reason:
-        "Revisit implementation fluency with a small new challenge and check independent recall.",
+        "Practice implementation fluency with a clean, grounded baseline challenge from your shortlist.",
       kind: "new-challenge",
-      minutes: 20,
+      minutes: 15,
+      difficultyModifier: 0,
+      disguiseVerified: true,
       evidenceIds: input.evidence.slice(0, 1).map((e: any) => e.id),
     },
     ...choice,
@@ -61,38 +72,60 @@ const validRun: Run = async (input: any, tools, selectedChoice) => {
 };
 async function drive(
   db: AttemptStore,
-  response: (op: string) => unknown = (op) =>
-    op === "list" ? { totalNum: 1, questions: [candidate] } : problem,
+  response: (op: string, args: any) => unknown = (_op, args) =>
+    args?.slug === "ransom-note"
+      ? altProblem
+      : {
+          ...problem,
+          titleSlug: args?.slug ?? problem.titleSlug,
+          title: args?.slug ?? problem.title,
+        },
 ) {
   for (let tick = 0; tick < 100; tick++) {
     const state = prescriptionStatus(db, choice);
     if (state.job?.state !== "running") return state;
     for (const request of state.job.requests)
-      answerCatalogRequest(db, state.job.id, request.id, response(request.op));
+      answerCatalogRequest(
+        db,
+        state.job.id,
+        request.id,
+        response(request.op, request.args),
+      );
     await new Promise((resolve) => setImmediate(resolve));
   }
   throw new Error("Fixture did not finish");
 }
 
-test("agent chooses from live catalog, verifies Java access, saves provenance and survives snapshot restore", async () => {
+test("agent chooses from deterministic shortlist without search_problems, verifies access, and survives snapshot restore", async () => {
   const db = new AttemptStore(":memory:");
   const sandbox = new AttemptStore(":memory:", true);
   let calls = 0;
   startPrescription(db, false, {
     choice,
-    run: async (...args) => {
+    skipDrain: true,
+    run: async (input: any, tools, selectedChoice) => {
       calls++;
-      return validRun(...args);
+      assert.equal(
+        tools.definitions.some((d) => d.name === "search_problems"),
+        false,
+        "Planner must not expose search_problems",
+      );
+      assert.deepEqual(
+        tools.definitions.map((d) => d.name),
+        ["find_skill_evidence", "inspect_problem", "request_more_candidates"],
+      );
+      return validRun(input, tools, selectedChoice);
     },
   });
   const status = await drive(db);
   assert.equal(status.job?.state, "complete", status.job?.error ?? "");
-  assert.equal(status.prescription?.slug, "ransom-note");
-  assert.equal(status.prescription?.minutes, 20);
+  assert.ok(["contains-duplicate", "ransom-note"].includes(status.prescription?.slug ?? ""));
+  assert.equal(status.prescription?.minutes, 15);
+  assert.ok(status.prescription?.intent);
   assert.ok(status.prescription?.evidence[0].url);
   assert.equal(db.memory.uses()[0].attemptId, undefined);
   assert.equal(db.history().length, 0);
-  startPrescription(db, false, { choice, run: validRun });
+  startPrescription(db, false, { choice, skipDrain: true, run: validRun });
   assert.equal(calls, 1);
   const snap = parseSnapshot(
     captureSnapshot(
@@ -110,20 +143,20 @@ test("agent chooses from live catalog, verifies Java access, saves provenance an
   restored.db.close();
 });
 
-test("cold start has no invented skill deficit or hardcoded problem", async () => {
+test("cold start allows empty evidenceIds when intent is attached without inventing evidence", async () => {
   const db = new AttemptStore(":memory:");
   db.db.exec(
     "DELETE FROM skill_evidence; DELETE FROM skill_evidence_search; DELETE FROM historical_evidence; DELETE FROM coaching_memories;",
   );
   assert.equal(recommend([]), null);
-  startPrescription(db, false, { choice, run: validRun });
+  startPrescription(db, false, { choice, skipDrain: true, run: validRun });
   const status = await drive(db);
   assert.equal(status.job?.state, "complete", status.job?.error ?? "");
   assert.deepEqual(status.prescription?.evidence, []);
   db.db.close();
 });
 
-test("unverified choices, invented evidence and inaccessible problems never become prescriptions", async () => {
+test("F19: unverified choices, invented evidence and inaccessible problems never become prescriptions", async () => {
   for (const kind of [
     "unverified",
     "invented",
@@ -132,35 +165,32 @@ test("unverified choices, invented evidence and inaccessible problems never beco
     "identity",
   ]) {
     const db = new AttemptStore(":memory:");
-    const run: Run = async (...args) => {
+    const run: Run = async (input, tools, selectedChoice) => {
       if (kind === "unverified")
         return {
           value: {
-            slug: "invented",
+            slug: "contains-duplicate",
             reason: "A manageable next challenge without actual verification.",
             kind: "new-challenge",
-            minutes: 25,
+            minutes: 15,
+            difficultyModifier: 0,
+            disguiseVerified: true,
             evidenceIds: [],
           },
           ...choice,
         };
-      const r = await validRun(...args);
+      const r = await validRun(input, tools, selectedChoice);
       if (kind === "invented")
         (r.value as any).evidenceIds = ["invented-record"];
       return r;
     };
-    startPrescription(db, false, { choice, run });
-    const result = await drive(db, (op) =>
-      op === "list"
-        ? { totalNum: 1, questions: [candidate] }
-        : {
-            ...problem,
-            locked: kind === "locked",
-            javaStarter: kind === "no-java" ? null : problem.javaStarter,
-            titleSlug:
-              kind === "identity" ? "other-problem" : problem.titleSlug,
-          },
-    );
+    startPrescription(db, false, { choice, skipDrain: true, run });
+    const result = await drive(db, () => ({
+      ...problem,
+      locked: kind === "locked",
+      javaStarter: kind === "no-java" ? null : problem.javaStarter,
+      titleSlug: kind === "identity" ? "other-problem" : problem.titleSlug,
+    }));
     assert.equal(result.job?.state, "failed", kind);
     assert.equal(result.prescription, undefined);
     assert.equal(db.memory.uses().length, 0);
@@ -168,7 +198,7 @@ test("unverified choices, invented evidence and inaccessible problems never beco
   }
 });
 
-test("only active preferences and nonexcluded corrected evidence reach the planner", async () => {
+test("only active preferences and nonexcluded corrected evidence reach the planner; planning preference invalidates cache", async () => {
   const db = new AttemptStore(":memory:");
   const suggested = db.memory.list()[0];
   suggested.status = "proposed";
@@ -206,58 +236,49 @@ test("only active preferences and nonexcluded corrected evidence reach the plann
     );
     return validRun(input, tools, selectedChoice);
   };
-  startPrescription(db, false, { choice, run });
+  startPrescription(db, false, { choice, skipDrain: true, run });
   const checked = await drive(db);
   assert.equal(checked.job?.state, "complete", checked.job?.error ?? "");
-  db.memory.correctEvidence(
-    corrected.id,
-    1,
-    "New evidence changes the interpretation",
-  );
+  // Non-planning evidence edits do NOT churn contextKey, whereas planning preferences DO invalidate
+  assert.ok(savedPrescription(db, choice));
+  db.memory.add({ text: "Prefer concise graph drills", scope: "planning" });
   assert.equal(savedPrescription(db, choice), undefined);
   db.db.close();
 });
 
-test("another choice excludes the prior suggestion, reuses concurrent work, and cannot change practice evidence", async () => {
+test("another choice excludes prior suggestion, supports batch-2 fallback, and preserves evidence", async () => {
   const db = new AttemptStore(":memory:");
   const before = db.memory.search();
-  startPrescription(db, false, { choice, run: validRun });
+  startPrescription(db, false, { choice, skipDrain: true, run: validRun });
   const first = await drive(db);
-  let calls = 0;
-  const next = startPrescription(db, true, {
+  const firstSlug = first.prescription!.slug;
+  assert.ok(["contains-duplicate", "ransom-note"].includes(firstSlug));
+
+  startPrescription(db, true, {
     choice,
-    run: async (input: any, tools) => {
-      calls++;
-      assert.deepEqual(input.skippedSlugs, [candidate.titleSlug]);
-      const results = (await tools.handle("search_problems", {
-        search: "",
-        difficulty: "EASY",
-        skip: 0,
-      })) as any;
-      assert.equal(results.questions.length, 0);
+    skipDrain: true,
+    run: async (input: any, tools, selectedChoice) => {
+      assert.deepEqual(input.skippedSlugs, [firstSlug]);
+      assert.ok(input.shortlist.every((c: any) => c.slug !== firstSlug));
       await assert.rejects(
-        tools.handle("inspect_problem", { slug: candidate.titleSlug }),
-        /skipped/,
+        tools.handle("inspect_problem", { slug: firstSlug }),
+        /shortlist/,
       );
-      throw new Error("No suitable alternative in fixture");
+      return validRun(input, tools, selectedChoice);
     },
   });
-  assert.equal(
-    startPrescription(db, true, { choice, run: validRun }).job?.id,
-    next.job?.id,
-  );
-  const state = await drive(db);
-  assert.equal(calls, 1);
-  assert.equal(state.job?.state, "failed");
-  assert.deepEqual(state.prescription, first.prescription);
+  const second = await drive(db);
+  assert.equal(second.job?.state, "complete", second.job?.error ?? "");
+  assert.notEqual(second.prescription?.slug, firstSlug);
   assert.deepEqual(db.memory.search(), before);
   db.db.close();
 });
 
-test("history changes during generation cannot save stale advice; active attempts take precedence", async () => {
+test("history changes during generation cannot save stale advice; active/unsettled attempts gate prescriptions", async () => {
   const db = new AttemptStore(":memory:");
   startPrescription(db, false, {
     choice,
+    skipDrain: true,
     run: async (...args) => {
       const result = await validRun(...args);
       db.memory.add({ text: "Prefer brief reasons", scope: "planning" });
@@ -270,7 +291,7 @@ test("history changes during generation cannot save stale advice; active attempt
   const a = db.create({ ...problem, titleSlug: "ransom-note" }, 60000, false);
   assert.equal(recommend(db.history())?.basedOn, a.id);
   assert.throws(
-    () => startPrescription(db, false, { choice, run: validRun }),
+    () => startPrescription(db, false, { choice, skipDrain: true, run: validRun }),
     /current learning session/,
   );
   db.db.close();
@@ -319,8 +340,8 @@ test("planner runtime exposes only scoped prescription tools, honors Low, and cl
       definitions: [
         {
           type: "function",
-          name: "search_problems",
-          description: "Search",
+          name: "inspect_problem",
+          description: "Inspect",
           inputSchema: {},
         },
       ],
@@ -331,7 +352,7 @@ test("planner runtime exposes only scoped prescription tools, honors Low, and cl
     calls
       .find((c) => c.method === "thread/start")
       .params.dynamicTools.map((t: any) => t.name),
-    ["search_problems"],
+    ["inspect_problem"],
   );
   assert.equal(
     calls.find((c) => c.method === "turn/start").params.effort,
@@ -347,13 +368,13 @@ test("a library reset cancels pending catalog work without saving stale prescrip
   process.env.DUO_DATABASE = path.join(dir, "practice.sqlite");
   const db = new AttemptStore(":memory:");
   try {
-    startPrescription(db, false, { choice, run: validRun });
+    startPrescription(db, false, { choice, skipDrain: true, run: validRun });
     assert.equal(prescriptionStatus(db, choice).job?.requests.length, 1);
     advanceGeneration();
     assert.equal(prescriptionStatus(db, choice).job?.state, "failed");
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(db.memory.uses().length, 0);
-    startPrescription(db, false, { choice, run: validRun });
+    startPrescription(db, false, { choice, skipDrain: true, run: validRun });
     const state = await drive(db);
     assert.equal(state.job?.state, "complete", state.job?.error ?? "");
   } finally {
@@ -366,7 +387,7 @@ test("a library reset cancels pending catalog work without saving stale prescrip
 
 test("catalog failures are retryable and a successful retry leaves attempts untouched", async () => {
   const db = new AttemptStore(":memory:");
-  startPrescription(db, false, { choice, run: validRun });
+  startPrescription(db, false, { choice, skipDrain: true, run: validRun });
   const state = prescriptionStatus(db, choice);
   answerCatalogRequest(
     db,
@@ -378,7 +399,7 @@ test("catalog failures are retryable and a successful retry leaves attempts unto
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(prescriptionStatus(db, choice).job?.state, "failed");
   assert.equal(db.memory.uses().length, 0);
-  startPrescription(db, false, { choice, run: validRun });
+  startPrescription(db, false, { choice, skipDrain: true, run: validRun });
   assert.equal((await drive(db)).job?.state, "complete");
   assert.equal(db.history().length, 0);
   db.db.close();
@@ -449,6 +470,7 @@ test("explicit revisit targets reach the planner after reflection completion and
     let inspected = false;
     startPrescription(db, false, {
       choice,
+      skipDrain: true,
       run: async (input: any, ...rest) => {
         inspected = true;
         assert.equal(

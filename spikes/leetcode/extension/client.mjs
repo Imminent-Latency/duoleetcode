@@ -1,7 +1,7 @@
 const statusQuery='query globalData { userStatus { isSignedIn username isPremium } }';
 const listQuery=`query problemsetQuestionList($categorySlug:String,$limit:Int,$skip:Int,$filters:QuestionListFilterInput){
   problemsetQuestionList:questionList(categorySlug:$categorySlug,limit:$limit,skip:$skip,filters:$filters){
-    totalNum questions:data{questionFrontendId title titleSlug difficulty isPaidOnly status topicTags{name slug}}
+    totalNum questions:data{questionFrontendId title titleSlug difficulty acRate isPaidOnly status topicTags{name slug}}
   }
 }`;
 const detailQuery=`query questionData($titleSlug:String!){question(titleSlug:$titleSlug){
@@ -25,8 +25,10 @@ export class LeetCodeClient {
     return response.data;
   }
   async status(){const data=await this.graphql('globalData',statusQuery);return data.userStatus;}
-  async list({skip=0,limit=20,search='',difficulty=''}={}){
-    const filters={};if(search)filters.searchKeywords=search;if(difficulty)filters.difficulty=difficulty;
+  async list({skip=0,limit=20,search='',difficulty='',tag='',orderBy=''}={}){
+    const filters={};if(search)filters.searchKeywords=search;if(difficulty)filters.difficulty=difficulty;if(tag)filters.tags=[tag];
+    if(orderBy==='AC_RATE_DESC'){filters.orderBy='AC_RATE';filters.sortOrder='DESCENDING';}
+    else if(orderBy==='AC_RATE_ASC'){filters.orderBy='AC_RATE';filters.sortOrder='ASCENDING';}
     const data=await this.graphql('problemsetQuestionList',listQuery,{categorySlug:'algorithms',limit,skip,filters});
     return data.problemsetQuestionList;
   }

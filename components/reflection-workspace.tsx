@@ -340,7 +340,7 @@ export default function ReflectionWorkspace({
           </Button>
           <Button
             className={ready ? "button primary" : "button secondary"}
-            disabled={intakeActive && savingIntake}
+            disabled={(intakeActive && !a.demonstration) || (intakeActive && savingIntake)}
             onClick={() =>
               safe(async () => {
                 setPlaying(false);
@@ -351,11 +351,13 @@ export default function ReflectionWorkspace({
           >
             {closed
               ? "Back to today"
-              : ready
-                ? "Move on"
-                : messages.some((m) => m.role === "user")
-                  ? "Move on anytime"
-                  : "Skip reflection"}
+              : intakeActive && !a.demonstration
+                ? "Complete check-in below"
+                : ready
+                  ? "Move on"
+                  : messages.some((m) => m.role === "user")
+                    ? "Move on anytime"
+                    : "Skip reflection"}
           </Button>
         </div>
       </header>

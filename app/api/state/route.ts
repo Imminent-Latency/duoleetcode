@@ -1,5 +1,5 @@
 import { database } from "@/lib/store";
-import { failure, json, localRequest } from "@/lib/http";
+import { failure, httpError, json, localRequest } from "@/lib/http";
 import { problemSchema } from "@/lib/validation";
 import { recommend } from "@/lib/recommendation";
 import { latestCoaching } from "@/lib/coaching";
@@ -9,6 +9,16 @@ import { demoProblem } from "@/lib/demo";
 import { DEFAULT_LANGUAGE, languageIdSchema } from "@/lib/languages";
 import { resolveDefaultLanguage } from "@/lib/agent-settings";
 import { readAgentSettings } from "@/lib/agent-settings-store";
+import { buildRatingProfile } from "@/lib/rating-profile";
+import {
+  listSavedPrescriptionsById,
+  prescriptionContextKeyForIntent,
+} from "@/lib/prescription";
+import {
+  isManualTimeboxRated,
+  nextAssessmentGate,
+  resolveLaunchPrescription,
+} from "@/lib/skill-ratings";
 import { z } from "zod";
 export const runtime = "nodejs";
 export async function GET(req: Request) {
@@ -32,6 +42,7 @@ export async function GET(req: Request) {
       defaultLanguage,
       importedHistory: practice.imported(),
       recommendation: recommend(history),
+      ratings: buildRatingProfile(practice),
       skills: history.flatMap(
         (a) =>
           a.evaluations.at(-1)?.strengths.map((s) => ({
@@ -73,6 +84,9 @@ export async function POST(req: Request) {
         budgetMs: z.number().int().min(60000).max(5400000),
         demonstration: z.boolean().default(false),
         language: languageIdSchema.default("java"),
+        prescriptionId: z.string().uuid().optional(),
+        selectionSpoilerRevealed: z.boolean().optional(),
+        isPremium: z.boolean().default(false),
       })
       .parse(await req.json());
     localRequest(req);
@@ -81,12 +95,71 @@ export async function POST(req: Request) {
       body.demonstration ||
       body.problem.titleSlug === demoProblem.titleSlug;
     const target = database(demonstration ? "sandbox" : "practice");
-    if (target.list().some((a) => a.phase === "active" || a.phase === "paused"))
+    if (!demonstration) {
+      const gate = nextAssessmentGate(target.history());
+      if (!gate.allowed) {
+        throw new Error(
+          gate.message ??
+            "Finish your current session before starting another.",
+        );
+      }
+    } else if (
+      target.list().some((a) => a.phase === "active" || a.phase === "paused")
+    ) {
       throw new Error(
         "Resume or finish your existing assessment before starting another.",
       );
+    }
     if (body.problem.locked)
       throw new Error("This problem is unavailable to your connected account.");
+
+    let launchMeta: Parameters<typeof target.create>[5] | undefined;
+    if (body.prescriptionId && !demonstration) {
+      const savedById = listSavedPrescriptionsById(target);
+      const existingRec = savedById.get(body.prescriptionId);
+      const currentKey = existingRec
+        ? prescriptionContextKeyForIntent(
+            target,
+            existingRec.intent,
+            body.language,
+            body.isPremium,
+            existingRec.skippedSlugs,
+          )
+        : "";
+      const resolution = resolveLaunchPrescription({
+        suppliedId: body.prescriptionId,
+        savedById,
+        currentContextKey: currentKey,
+        slug: body.problem.titleSlug,
+        language: body.language,
+        now: Date.now(),
+      });
+      if (resolution.mode === "conflict") {
+        throw httpError(resolution.error, 409);
+      }
+      if (
+        resolution.mode === "prescribed" ||
+        resolution.mode === "prescribed-stale-honored"
+      ) {
+        const chosenMinutes = Math.round(body.budgetMs / 60_000);
+        const prescribedMinutes = resolution.record.minutes ?? chosenMinutes;
+        const rated = isManualTimeboxRated(prescribedMinutes, chosenMinutes);
+        launchMeta = {
+          prescriptionId: resolution.record.id,
+          intent: resolution.intent,
+          difficultyScore: resolution.record.difficultyScore,
+          difficultyModifier: resolution.record.difficultyModifier,
+          standardMinutes: resolution.record.standardMinutes,
+          prescribedMinutes,
+          selectionSpoilerRevealed: Boolean(
+            body.selectionSpoilerRevealed ||
+              resolution.record.selectionSpoilerRevealed,
+          ),
+          rated,
+        };
+      }
+    }
+
     return json({
       attempt: target.create(
         body.problem,
@@ -94,6 +167,7 @@ export async function POST(req: Request) {
         demonstration,
         undefined,
         body.language,
+        launchMeta,
       ),
       serverTime: Date.now(),
     });

@@ -235,3 +235,25 @@ test('supports cppStarter extraction, execution lang=cpp, and rejects missing cp
   const noCpp=setup({problem:async()=>({questionId:'1',title:'Two Sum',javaStarter:'class Solution {}',cppStarter:null,exampleInputs:{raw:'[2,7]\n9'},locked:false})});
   await assert.rejects(noCpp.dispatch('start',{...args,lang:'cpp',idempotencyKey:'test-nocpp-00000000001'}),/C\+\+ starter/);
 });
+
+test('list bridge forwards limit<=100, tag, orderBy and client preserves acRate',async()=>{
+  const queries=[];
+  const session={
+    request:async(url,options)=>{
+      queries.push({url,options});
+      return {data:{problemsetQuestionList:{totalNum:1,questions:[{questionFrontendId:'1',title:'Two Sum',titleSlug:'two-sum',difficulty:'Easy',acRate:55.1,isPaidOnly:false,status:null,topicTags:[{name:'Array',slug:'array'}]}]}}};
+    }
+  };
+  const client=new LeetCodeClient(session);
+  const page=await client.list({skip:0,limit:100,tag:'hash-table',orderBy:'AC_RATE_DESC'});
+  assert.equal(page.questions[0].acRate,55.1);
+  assert.deepEqual(queries[0].options.body.variables.filters,{tags:['hash-table'],orderBy:'AC_RATE',sortOrder:'DESCENDING'});
+
+  const listCalls=[];
+  const s=setup({list:async(opts)=>{listCalls.push(opts);return {totalNum:1,questions:[]};}});
+  await s.dispatch('list',{skip:200,limit:100,search:'',difficulty:'MEDIUM',tag:'binary-search',orderBy:'AC_RATE_ASC'});
+  assert.deepEqual(listCalls[0],{skip:200,limit:100,search:'',difficulty:'MEDIUM',tag:'binary-search',orderBy:'AC_RATE_ASC'});
+  await assert.rejects(s.dispatch('list',{limit:101}),/Invalid search filters/);
+  await assert.rejects(s.dispatch('list',{tag:'../bad'}),/Invalid search filters/);
+  await assert.rejects(s.dispatch('list',{orderBy:'DROP_TABLE'}),/Invalid search filters/);
+});

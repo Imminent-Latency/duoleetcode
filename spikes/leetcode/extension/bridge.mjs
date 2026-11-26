@@ -103,9 +103,9 @@ export class Bridge {
       return {...info,isSignedIn:signedIn,state:signedIn?'ready':'signed-out',loginUrl:'https://leetcode.com/accounts/login/'};
     }
     if(op==='list'){
-      const {skip=0,limit=10,search='',difficulty=''}=args;
-      if(!Number.isInteger(skip)||skip<0||!Number.isInteger(limit)||limit<1||limit>50||typeof search!=='string'||search.length>100||!['','EASY','MEDIUM','HARD'].includes(difficulty))throw new Error('Invalid search filters');
-      return this.client.list({skip,limit,search,difficulty});
+      const {skip=0,limit=10,search='',difficulty='',tag='',orderBy=''}=args;
+      if(!Number.isInteger(skip)||skip<0||!Number.isInteger(limit)||limit<1||limit>100||typeof search!=='string'||search.length>100||!['','EASY','MEDIUM','HARD'].includes(difficulty)||typeof tag!=='string'||(tag&&!/^[a-z0-9-]{1,80}$/.test(tag))||!['','AC_RATE_DESC','AC_RATE_ASC'].includes(orderBy))throw new Error('Invalid search filters');
+      return this.client.list({skip,limit,search,difficulty,tag,orderBy});
     }
     if(op==='problem')return this.client.problem(slug(args.slug));
     if(op==='start')return this.start(args);

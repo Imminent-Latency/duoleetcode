@@ -405,27 +405,29 @@ test("C++26 attempt lifecycle, editor context validation, snapshots, test parame
 
   const choice = { model: "fixture-planner", effort: "low" };
   const candidate = {
+    questionFrontendId: "1",
     title: "Two Sum",
     titleSlug: "two-sum",
-    difficulty: "Easy",
+    difficulty: "Easy" as const,
+    acRate: 64,
     isPaidOnly: false,
-    topicTags: [{ name: "Array" }],
+    topicTags: [{ name: "Hash Table", slug: "hash-table" }],
   };
+  db.ratings.upsertCatalogPage([candidate]);
   const cppOnlyProblem = {
     ...demoProblem,
     ...candidate,
     questionId: "1",
-    questionFrontendId: "1",
     javaStarter: "",
     cppStarter: "class Solution { public: vector<int> twoSum(vector<int>& nums, int target) { return {}; } };",
     locked: false,
   };
   startPrescription(db, false, {
     choice,
+    skipDrain: true,
     run: async (input: any, tools, selectedChoice, language) => {
       assert.equal(language, "cpp");
       assert.equal(input.language, "C++26");
-      await tools.handle("search_problems", { search: "two", difficulty: "EASY", skip: 0 });
       const inspected = (await tools.handle("inspect_problem", { slug: "two-sum" })) as any;
       assert.equal(inspected.available, true);
       assert.ok(inspected.cppStarter);
@@ -434,7 +436,9 @@ test("C++26 attempt lifecycle, editor context validation, snapshots, test parame
           slug: "two-sum",
           reason: "Practice C++26 standard library containers and clean problem reading.",
           kind: "new-challenge",
-          minutes: 20,
+          minutes: 15,
+          difficultyModifier: 0,
+          disguiseVerified: true,
           evidenceIds: input.evidence.slice(0, 1).map((e: any) => e.id),
         },
         ...selectedChoice,

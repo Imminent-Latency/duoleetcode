@@ -23,6 +23,12 @@ import DataManagement from "./data-management";
 import ProblemPrescription, {
   useProblemPrescription,
 } from "./problem-prescription";
+import WelcomeOnboarding from "./welcome-onboarding";
+import {
+  ProgressSkillProfile,
+  TodayRatingCard,
+  type RatingsProfileDto,
+} from "./skill-profile";
 import PracticeLibrary from "./practice-library";
 import ReviewFlagButton from "./review-flag";
 import ResearchSources from "./research-sources";
@@ -86,6 +92,8 @@ import { useAgentSymbols } from "./use-agent-symbols";
 import { splitTestCases, testParameters } from "@/lib/test-cases";
 import { clockRemaining } from "@/lib/recording";
 import { demoProblem } from "@/lib/demo";
+import type { Prescription } from "@/lib/prescription-types";
+import { isManualTimeboxRated } from "@/lib/skill-ratings";
 import type {
   Attempt,
   AttemptSummary,
@@ -153,6 +161,7 @@ export default function Workspace() {
   const [saveStatus, setSaveStatus] = useState("All changes saved");
   const [now, setNow] = useState(Date.now());
   const [selected, setSelected] = useState<Problem>();
+  const [selectedPrescription, setSelectedPrescription] = useState<Prescription>();
   const [minutes, setMinutes] = useState(25);
   const [testSession, setTestSession] = useState(false);
   const [otherTab, setOtherTab] = useState(false);
@@ -177,7 +186,9 @@ export default function Workspace() {
     !!connection?.isSignedIn,
     !!agentStatus?.signedIn,
     preferredLanguage,
+    Boolean(connection?.isPremium),
   );
+  const catalogSyncBusy = useRef(false);
   const updatePreferredLanguage = (next: LanguageId) => {
     languageOverridden.current = true;
     setPreferredLanguage(next);
@@ -193,6 +204,58 @@ export default function Workspace() {
     setState(data);
     return data;
   }, []);
+  useEffect(() => {
+    if (
+      !connection.isSignedIn ||
+      !state ||
+      state.sandboxMode ||
+      view === "attempt"
+    )
+      return;
+    const sync = state.ratings?.catalogSync;
+    if (!sync?.needsRefresh) return;
+    if (sync.backoffUntil && Date.now() < sync.backoffUntil) return;
+    if (catalogSyncBusy.current) return;
+    let live = true;
+    const timer = setTimeout(async () => {
+      catalogSyncBusy.current = true;
+      try {
+        const page: any = await bridge("list", {
+          skip: sync.nextSkip ?? 0,
+          limit: 100,
+        });
+        if (!live) return;
+        await api("/api/catalog-sync", {
+          action: "ingest-page",
+          skip: sync.nextSkip ?? 0,
+          totalNum: Number(page.totalNum ?? 0),
+          questions: Array.isArray(page.questions) ? page.questions : [],
+        });
+        if (live) await reload().catch(() => {});
+      } catch (e) {
+        if (live) {
+          await api("/api/catalog-sync", {
+            action: "record-error",
+            error: errorText(e),
+          }).catch(() => {});
+        }
+      } finally {
+        catalogSyncBusy.current = false;
+      }
+    }, 800);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [
+    connection.isSignedIn,
+    state?.ratings?.catalogSync?.nextSkip,
+    state?.ratings?.catalogSync?.needsRefresh,
+    state?.ratings?.catalogSync?.backoffUntil,
+    state?.sandboxMode,
+    view,
+    reload,
+  ]);
   const showError = (e: unknown) => setError(errorText(e));
   const refreshAttempt = async (isCurrent = () => true) => {
     if (!active.current) return;
@@ -832,6 +895,17 @@ export default function Workspace() {
         budgetMs: minutes * 60000,
         demonstration: selected.questionId === "demo" || testSession,
         language: sessionLanguage,
+        ...(!testSession &&
+        selectedPrescription &&
+        selectedPrescription.slug === selected.titleSlug
+          ? {
+              prescriptionId: selectedPrescription.id,
+              selectionSpoilerRevealed: Boolean(
+                selectedPrescription.selectionSpoilerRevealed,
+              ),
+              isPremium: Boolean(connectionRef.current.isPremium),
+            }
+          : {}),
       });
       await acquire(a.id);
       const r = new Recorder(a, serverTime, setSaveStatus);
@@ -839,6 +913,7 @@ export default function Workspace() {
       setAttempt(a);
       setSource(a.source);
       setSelected(undefined);
+      setSelectedPrescription(undefined);
       setTestSession(false);
       setView("attempt");
       localStorage.setItem(
@@ -1290,11 +1365,22 @@ export default function Workspace() {
                 />
               </div>
             </div>
+            {!state?.sandboxMode &&
+              state?.ratings?.onboarding?.showWelcomePicker && (
+                <WelcomeOnboarding
+                  onUpdated={async () => {
+                    await reload();
+                  }}
+                  onError={showError}
+                />
+              )}
             <div className="home-grid">
               <ProblemPrescription
                 controller={prescription}
                 language={preferredLanguage}
+                isPremium={Boolean(connection?.isPremium)}
                 continuation={state?.recommendation}
+                gate={state?.ratings?.gate}
                 ready={
                   !!connection?.isSignedIn &&
                   !!agentStatus?.signedIn &&
@@ -1304,11 +1390,15 @@ export default function Workspace() {
                 agentSignedIn={!!agentStatus?.signedIn}
                 disabled={!!busy}
                 onOpen={open}
-                onChoose={(slug, budget) => {
+                onChoose={(slug, budget, rx) => {
                   setMinutes(budget);
+                  setSelectedPrescription(rx);
                   void choose(slug);
                 }}
-                onBrowse={() => navigate("catalog")}
+                onBrowse={() => {
+                  setSelectedPrescription(undefined);
+                  navigate("catalog");
+                }}
                 onConnect={() => navigate("connections")}
                 onBridgeAction={connect}
               />
@@ -1335,6 +1425,20 @@ export default function Workspace() {
                 </div>
               </Panel>
             </div>
+            {!state?.sandboxMode && state?.ratings && (
+              <TodayRatingCard
+                ratings={state.ratings as RatingsProfileDto}
+                onRetryDrain={async () => {
+                  try {
+                    await api("/api/ratings", { action: "retry-drain" });
+                    await reload();
+                  } catch (e) {
+                    showError(e);
+                  }
+                }}
+                onOpenAttempt={open}
+              />
+            )}
             <div className="section-heading">
               <h2>Your practice, with a feedback loop.</h2>
               <span>THREE SMALL STEPS</span>
@@ -1452,14 +1556,24 @@ export default function Workspace() {
           <Catalog
             language={preferredLanguage}
             onLanguageChange={updatePreferredLanguage}
-            onChoose={choose}
+            onChoose={(slug) => {
+              setSelectedPrescription(undefined);
+              void choose(slug);
+            }}
             disabled={!!busy}
             connection={connection}
             onBridgeAction={connect}
             onRecheck={() => void checkBridge({ manual: true })}
           />
         )}
-        {view === "history" && <Progress state={state} onOpen={open} />}
+        {view === "history" && (
+          <Progress
+            state={state}
+            onOpen={open}
+            onRefresh={reload}
+            onError={showError}
+          />
+        )}
         {view === "settings" && (
           <AgentSettings onDefaultLanguageChange={updatePreferredLanguage} />
         )}
@@ -1780,7 +1894,10 @@ export default function Workspace() {
       {selected && (
         <Modal
           opened
-          onClose={() => setSelected(undefined)}
+          onClose={() => {
+            setSelected(undefined);
+            setSelectedPrescription(undefined);
+          }}
           title="Make room for one attempt."
           size={540}
           className="duo-prepare-modal"
@@ -1842,6 +1959,15 @@ export default function Workspace() {
               allowDecimal={false}
             />
           </div>
+          {selectedPrescription &&
+            selectedPrescription.slug === selected.titleSlug &&
+            !testSession && (
+              <p className="small">
+                {isManualTimeboxRated(selectedPrescription.minutes, minutes)
+                  ? `Within ±5 min of prescribed ${selectedPrescription.minutes} min — rated session (effective difficulty scales with clock).`
+                  : `Outside ±5 min of prescribed ${selectedPrescription.minutes} min — runs as unrated practice.`}
+              </p>
+            )}
           {selected.questionId !== "demo" && (
             <Checkbox
               checked={testSession}
@@ -2798,9 +2924,13 @@ function Findings({
 function Progress({
   state,
   onOpen,
+  onRefresh,
+  onError,
 }: {
   state: any;
   onOpen: (id: string) => void;
+  onRefresh: () => Promise<unknown>;
+  onError: (err: unknown) => void;
 }) {
   const attempts: AttemptSummary[] = state?.attempts ?? [];
   const real = attempts.filter((a) => !a.demonstration);
@@ -2843,6 +2973,15 @@ function Progress({
           <p>First responses preserved</p>
         </Panel>
       </div>
+      {state?.ratings && (
+        <ProgressSkillProfile
+          ratings={state.ratings as RatingsProfileDto}
+          onRefresh={async () => {
+            await onRefresh();
+          }}
+          onError={onError}
+        />
+      )}
       <PracticeLibrary
         key={String(Boolean(state?.sandboxMode))}
         attempts={attempts}

@@ -1,6 +1,7 @@
 import type { Attempt } from "./types";
 import type { AgentSettings } from "./agent-settings";
 import type { CoachingMemory } from "./learner-memory-types";
+import type { RatingLibrarySnapshot } from "./rating-store";
 
 export type MemoryImage = {
   version: number;
@@ -23,6 +24,7 @@ export type LibraryImage = {
   attempts: Attempt[];
   importedEvidence: Record<string, any>[];
   memory: MemoryImage;
+  ratings?: RatingLibrarySnapshot;
 };
 export type SnapshotData = {
   format: "duoleetcode-snapshot";

@@ -5,7 +5,10 @@ import { json, failure, localRequest } from "@/lib/http";
 import { eventSchema, jobSchema } from "@/lib/validation";
 import { candidateMoments, replay } from "@/lib/recording";
 import type { Attempt } from "@/lib/types";
-import { saveReflectionIntake } from "@/lib/reflection-service";
+import {
+  saveReflectionIntake,
+  skipReflectionCheckIn,
+} from "@/lib/reflection-service";
 import { publicJavaHelp } from "@/lib/java-help";
 import { resolveBackgroundSettings } from "@/lib/agent-settings";
 import { readAgentSettings } from "@/lib/agent-settings-store";
@@ -125,7 +128,16 @@ export async function POST(req: Request, ctx: Context) {
         .parse(raw.segment);
       a = store(id).recordContinuation(id, report);
     } else if (action === "reflection-intake") {
-      a = saveReflectionIntake(store(id), id, raw.answers);
+      const mode = z
+        .enum(["continue", "defer", "skip-coaching"])
+        .default("continue")
+        .parse(raw.mode);
+      a = saveReflectionIntake(store(id), id, raw.answers, undefined, mode);
+    } else if (action === "skip-checkin") {
+      const familiarity = z
+        .enum(["new", "revisit", "solved"])
+        .parse(raw.familiarity);
+      a = skipReflectionCheckIn(store(id), id, familiarity);
     } else if (action === "exposure") {
       a = store(id).setExposure(
         id,
