@@ -270,10 +270,17 @@ export default function Workspace() {
   useEffect(() => {
     void reload()
       .then((data) => {
-        const traceId = new URLSearchParams(window.location.search).get(
-          "trace",
-        );
-        const flagId = new URLSearchParams(window.location.search).get("flag");
+        const params = new URLSearchParams(window.location.search);
+        const attemptParam = params.get("attempt");
+        const traceId = params.get("trace");
+        const flagId = params.get("flag");
+        if (
+          attemptParam &&
+          data.attempts.some((a: AttemptSummary) => a.id === attemptParam)
+        ) {
+          void open(attemptParam);
+          return;
+        }
         if (flagId) {
           setReviewFlagId(flagId);
           setView("diagnostics");

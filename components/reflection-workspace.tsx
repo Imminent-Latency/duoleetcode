@@ -431,8 +431,8 @@ export default function ReflectionWorkspace({
                 reviewTarget={{ attemptId: a.id, source: "recording", seq }}
                 selectionResetKey={playbackEpoch}
                 readOnly
-                onContextChange={(context) => {
-                  chatEditor.onChange(context);
+                onContextChange={(context, nextSource) => {
+                  chatEditor.onChange(context, nextSource);
                   if (context.selection) setPlaying(false);
                 }}
                 onAskHelp={(context) => {

@@ -96,6 +96,37 @@ public:
     const info = await lsp.inspect(inspectCode, { line: 3, character: 38 });
     assert.ok(info.hover, "Expected hover info for vector::size");
     assert.match(JSON.stringify(info.hover), /size/);
+
+    // Regression: completion() followed by diagnostics() on identical text must resolve
+    // immediately from cached publishDiagnostics rather than stalling for 12s.
+    const sameCompCode = `class Solution {
+public:
+    int solve(vector<int>& nums) {
+        return static_cast<int>(nums.siz());
+    }
+};`;
+    await lsp.completion(sameCompCode, { line: 3, character: 39 });
+    await new Promise((r) => setTimeout(r, 400));
+    const t0 = Date.now();
+    const cachedDiags = await lsp.diagnostics(sameCompCode);
+    const elapsed = Date.now() - t0;
+    assert.ok(elapsed < 2000, `Expected fast diagnostics after completion, took ${elapsed}ms`);
+    assert.ok(cachedDiags.some((d) => /siz/.test(d.message)));
+
+    // Quick-fix code action test: pointer '.' -> '->'
+    const ptrCode = `class Solution {
+public:
+    int solve(vector<int>* nums) {
+        return static_cast<int>(nums.size());
+    }
+};`;
+    const ptrDiags = await lsp.diagnostics(ptrCode);
+    assert.ok(ptrDiags.length > 0);
+    const actions = await lsp.codeActions(ptrCode, ptrDiags[0].range, ptrDiags);
+    assert.ok(
+      actions.some((a: any) => /->/.test(a.title)),
+      `Expected '->' quick fix in ${JSON.stringify(actions)}`,
+    );
   } finally {
     await lsp.close();
   }

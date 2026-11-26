@@ -164,7 +164,7 @@ export function findClangdBinary(): string {
     "/usr/local/opt/llvm/bin/clangd",
     "/usr/bin/clangd",
   ]) {
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(/* turbopackIgnore: true */ candidate)) return candidate;
   }
   return "clangd";
 }
@@ -199,12 +199,13 @@ export class CppLspServer {
   private version = 0;
   private inspectVersion = 0;
   private inspectOpened = false;
-  private lastDiagSource?: string;
-  private lastDiags: LspDiagnostic[] = [];
+  private currentSolutionText?: string;
+  private publishedDiagnostics?: { version: number; diagnostics: LspDiagnostic[] };
   private diagWaiter?: {
     uri: string;
-    minVersion?: number;
+    minVersion: number;
     resolve: (diags: LspDiagnostic[]) => void;
+    reject: (error: Error) => void;
     timer: ReturnType<typeof setTimeout>;
   };
   private latestStatus: CppLspStatus = {
@@ -285,12 +286,16 @@ export class CppLspServer {
       const { uri, diagnostics, version } = msg.params;
       if (uri === this.solutionUri) {
         const list = Array.isArray(diagnostics) ? diagnostics : [];
+        const diagVersion =
+          typeof version === "number" ? version : this.version;
+        this.publishedDiagnostics = {
+          version: diagVersion,
+          diagnostics: list,
+        };
         if (
           this.diagWaiter &&
           this.diagWaiter.uri === uri &&
-          (version === undefined ||
-            this.diagWaiter.minVersion === undefined ||
-            version >= this.diagWaiter.minVersion)
+          diagVersion >= this.diagWaiter.minVersion
         ) {
           const waiter = this.diagWaiter;
           this.diagWaiter = undefined;
@@ -335,8 +340,10 @@ export class CppLspServer {
 
   private teardownProcess(reason = "C++26 language server stopped") {
     if (this.diagWaiter) {
-      clearTimeout(this.diagWaiter.timer);
+      const waiter = this.diagWaiter;
       this.diagWaiter = undefined;
+      clearTimeout(waiter.timer);
+      waiter.reject(new Error(reason));
     }
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);
@@ -351,8 +358,8 @@ export class CppLspServer {
     }
     this.readBuffer = Buffer.alloc(0);
     this.inspectOpened = false;
-    this.lastDiagSource = undefined;
-    this.lastDiags = [];
+    this.currentSolutionText = undefined;
+    this.publishedDiagnostics = undefined;
     this.startup = undefined;
   }
 
@@ -363,7 +370,7 @@ export class CppLspServer {
         const binary = findClangdBinary();
         let versionLine = "clangd";
         try {
-          const out = execFileSync(binary, ["--version"], {
+          const out = execFileSync(/* turbopackIgnore: true */ binary, ["--version"], {
             encoding: "utf8",
             timeout: 5000,
           }).trim();
@@ -437,6 +444,16 @@ export class CppLspServer {
             rootUri: "file://" + this.tempDir,
             capabilities: {
               textDocument: {
+                publishDiagnostics: {
+                  versionSupport: true,
+                },
+                codeAction: {
+                  codeActionLiteralSupport: {
+                    codeActionKind: {
+                      valueSet: ["quickfix"],
+                    },
+                  },
+                },
                 completion: {
                   completionItem: {
                     snippetSupport: true,
@@ -462,12 +479,14 @@ export class CppLspServer {
         );
         this.notify("initialized", {});
         this.version = 1;
+        this.currentSolutionText =
+          "class Solution { public: int warm() { vector<int> v{1}; return (int)v.size(); } };\n";
         this.notify("textDocument/didOpen", {
           textDocument: {
             uri: this.solutionUri,
             languageId: "cpp",
             version: this.version,
-            text: "class Solution { public: int warm() { vector<int> v{1}; return (int)v.size(); } };\n",
+            text: this.currentSolutionText,
           },
         });
         // Wait briefly for initial preamble warm-up via a hover request.
@@ -517,54 +536,73 @@ export class CppLspServer {
     return run;
   }
 
+  private syncSolutionDoc(wrapped: string): number {
+    if (this.currentSolutionText === wrapped) {
+      return this.version;
+    }
+    const nextVer = ++this.version;
+    this.currentSolutionText = wrapped;
+    this.notify("textDocument/didChange", {
+      textDocument: { uri: this.solutionUri, version: nextVer },
+      contentChanges: [{ text: wrapped }],
+    });
+    return nextVer;
+  }
+
   async diagnostics(text: string): Promise<LspDiagnostic[]> {
     return this.enqueue(async () => {
       const { text: wrapped, lineOffset } = wrapCppForLsp(text);
-      if (this.lastDiagSource === wrapped) {
-        return this.lastDiags;
+      const willChange = this.currentSolutionText !== wrapped;
+      const targetVersion = willChange ? this.version + 1 : this.version;
+      if (
+        !willChange &&
+        this.publishedDiagnostics &&
+        this.publishedDiagnostics.version >= targetVersion
+      ) {
+        return this.publishedDiagnostics.diagnostics
+          .filter((d) => d.range.start.line >= lineOffset)
+          .map((d) => ({
+            ...d,
+            range: shiftLspRange(d.range, -lineOffset),
+          }));
       }
-      const nextVer = ++this.version;
-      const wait = new Promise<LspDiagnostic[]>((resolve) => {
-        if (this.diagWaiter) clearTimeout(this.diagWaiter.timer);
+      const wait = new Promise<LspDiagnostic[]>((resolve, reject) => {
+        if (this.diagWaiter) {
+          const prev = this.diagWaiter;
+          this.diagWaiter = undefined;
+          clearTimeout(prev.timer);
+          prev.reject(new Error("Superseded by newer diagnostics request"));
+        }
         const timer = setTimeout(() => {
-          if (this.diagWaiter?.minVersion === nextVer) {
+          if (this.diagWaiter?.minVersion === targetVersion) {
             this.diagWaiter = undefined;
-            resolve(this.lastDiags);
+            reject(new Error("clangd timed out publishing diagnostics"));
           }
         }, 12000);
         timer.unref?.();
         this.diagWaiter = {
           uri: this.solutionUri,
-          minVersion: nextVer,
+          minVersion: targetVersion,
           resolve,
+          reject,
           timer,
         };
       });
-      this.notify("textDocument/didChange", {
-        textDocument: { uri: this.solutionUri, version: nextVer },
-        contentChanges: [{ text: wrapped }],
-      });
+      this.syncSolutionDoc(wrapped);
       const raw = await wait;
-      const shifted = raw
+      return raw
         .filter((d) => d.range.start.line >= lineOffset)
         .map((d) => ({
           ...d,
           range: shiftLspRange(d.range, -lineOffset),
         }));
-      this.lastDiagSource = wrapped;
-      this.lastDiags = shifted;
-      return shifted;
     });
   }
 
   async completion(text: string, position: LspPosition) {
     return this.enqueue(async () => {
       const { text: wrapped, lineOffset } = wrapCppForLsp(text);
-      const nextVer = ++this.version;
-      this.notify("textDocument/didChange", {
-        textDocument: { uri: this.solutionUri, version: nextVer },
-        contentChanges: [{ text: wrapped }],
-      });
+      this.syncSolutionDoc(wrapped);
       const result = await this.requestRpc(
         "textDocument/completion",
         {
@@ -601,11 +639,7 @@ export class CppLspServer {
   async codeActions(text: string, range: LspRange, diagnostics: LspDiagnostic[]) {
     return this.enqueue(async () => {
       const { text: wrapped, lineOffset } = wrapCppForLsp(text);
-      const nextVer = ++this.version;
-      this.notify("textDocument/didChange", {
-        textDocument: { uri: this.solutionUri, version: nextVer },
-        contentChanges: [{ text: wrapped }],
-      });
+      this.syncSolutionDoc(wrapped);
       const result = await this.requestRpc(
         "textDocument/codeAction",
         {

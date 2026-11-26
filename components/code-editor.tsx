@@ -24,7 +24,7 @@ type Props = {
   revealLine?: number;
   onDiagnostics?: (count: number, status: string, detail?: string) => void;
   diagnosticsRetry?: number;
-  onContextChange?: (context: EditorContextDraft) => void;
+  onContextChange?: (context: EditorContextDraft, source?: string) => void;
   onAskHelp?: (context: EditorContextDraft) => void;
   helpDisabled?: boolean;
   selectionResetKey?: number;
@@ -59,6 +59,7 @@ export default function CodeEditor({
   const chat = useRef({ onContextChange, onAskHelp, helpDisabled });
   chat.current = { onContextChange, onAskHelp, helpDisabled };
   const refreshChat = useRef<(() => void) | undefined>(undefined);
+  const refreshGlyph = useRef<(() => void) | undefined>(undefined);
   const diagnosticCallback = useRef(onDiagnostics);
   diagnosticCallback.current = onDiagnostics;
   const retryDiagnostics = useRef<(() => void) | undefined>(undefined);
@@ -160,9 +161,7 @@ export default function CodeEditor({
       },
     };
     if (chat.current.onAskHelp) editor.addGlyphMarginWidget(widget);
-    const update = () => {
-      const context = capture();
-      if (context) chat.current.onContextChange?.(context);
+    const updateGlyph = (context?: EditorContextDraft) => {
       button.disabled = chat.current.helpDisabled;
       const title = context?.selection
         ? "Ask about selected code"
@@ -171,7 +170,15 @@ export default function CodeEditor({
       button.title = `${title} · ⌘⇧H / Ctrl+Shift+H`;
       if (chat.current.onAskHelp) editor.layoutGlyphMarginWidget(widget);
     };
+    const update = () => {
+      const context = capture();
+      const model = editor.getModel();
+      if (context && model)
+        chat.current.onContextChange?.(context, model.getValue());
+      updateGlyph(context);
+    };
     refreshChat.current = update;
+    refreshGlyph.current = () => updateGlyph(capture());
     disposables.push(
       editor.onDidChangeCursorSelection(update),
       editor.onDidChangeModelContent(update),
@@ -192,6 +199,7 @@ export default function CodeEditor({
     disposables.push({
       dispose: () => {
         refreshChat.current = undefined;
+        refreshGlyph.current = undefined;
         captureFlag.current = undefined;
         if (chat.current.onAskHelp) editor.removeGlyphMarginWidget(widget);
         wrapper.remove();
@@ -887,7 +895,7 @@ export default function CodeEditor({
     if (diagnosticsRetry) retryDiagnostics.current?.();
   }, [diagnosticsRetry]);
   useEffect(() => {
-    refreshChat.current?.();
+    refreshGlyph.current?.();
   }, [helpDisabled]);
   useEffect(() => {
     if (selectionResetKey === undefined) return;
@@ -901,17 +909,25 @@ export default function CodeEditor({
   useEffect(() => {
     const editor = current.current;
     if (!editor) return;
+    let synced = false;
     applying.current = true;
     try {
       if ("getOriginalEditor" in editor) {
         const models = editor.getModel();
-        if (models && models.original.getValue() !== diffFrom)
+        if (models && models.original.getValue() !== diffFrom) {
           models.original.setValue(diffFrom ?? "");
-        if (models && models.modified.getValue() !== value)
+          synced = true;
+        }
+        if (models && models.modified.getValue() !== value) {
           models.modified.setValue(value);
+          synced = true;
+        }
       } else {
         editor.updateOptions({ readOnly });
-        if (editor.getValue() !== value) editor.setValue(value);
+        if (editor.getValue() !== value) {
+          editor.setValue(value);
+          synced = true;
+        }
       }
       if (revealLine) {
         const target =
@@ -921,7 +937,7 @@ export default function CodeEditor({
     } finally {
       applying.current = false;
     }
-    refreshChat.current?.();
+    if (synced) refreshChat.current?.();
   }, [value, readOnly, diffFrom, revealLine]);
   return (
     <div className="editor-review-wrap">

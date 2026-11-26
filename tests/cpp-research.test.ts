@@ -7,7 +7,7 @@ import {
   allowedCppSearchResult,
   cppSourceLocation,
 } from "../lib/cpp-research";
-import { cppReferenceUrl } from "../lib/cpp-reference";
+import { cppReferenceUrl, readCppReference } from "../lib/cpp-reference";
 import { cppLsp } from "../lib/cpp-lsp";
 import { validateEditorContext } from "../lib/editor-context";
 import { AttemptStore } from "../lib/store";
@@ -113,6 +113,60 @@ test("C++ reference URLs bind standard/cppreference paths and reject arbitrary U
     allowedCppSearchResult("https://stackoverflow.com/questions/42/example", "secondary"),
     true,
   );
+});
+
+test("readCppReference resolves eel.is single-quoted anchors and cppreference underscored sections cleanly", async () => {
+  const oldFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes("eel.is")) {
+        return new Response(
+          "<html><body><main><div id='general' class='section'><h3>26.8.1 General</h3><p>Sorting algorithms.</p></section></main></body></html>",
+          { status: 200 },
+        );
+      }
+      return new Response(
+        '<html><body><div id="mw-content-text"><div class="t-navbar">Navbar junk</div><table class="t-dcl-begin"><tbody><tr><td>emplace()</td></tr></tbody></table><h3><span class="mw-headline" id="Return_value">Return value</span></h3><p>Pair of iterator and bool.</p><h3><span class="mw-headline" id="Complexity">Complexity</span></h3><p>Amortized constant.</p><div class="printfooter">Footer junk</div></div></body></html>',
+        { status: 200 },
+      );
+    };
+
+    const eel = await readCppReference({
+      source: "standard",
+      standard: "c++26",
+      path: "alg.sorting",
+      section: "general",
+    });
+    assert.equal(eel.url, "https://eel.is/c++draft/alg.sorting#general");
+    assert.match(eel.text, /Sorting algorithms/);
+
+    const sec = await readCppReference({
+      source: "cppreference",
+      standard: "c++26",
+      path: "cpp/container/unordered_map/emplace",
+      section: "Return value",
+    });
+    assert.equal(
+      sec.url,
+      "https://en.cppreference.com/cpp/container/unordered_map/emplace#Return_value",
+    );
+    assert.match(sec.text, /Pair of iterator and bool/);
+    assert.doesNotMatch(sec.text, /Amortized constant/);
+
+    const overview = await readCppReference({
+      source: "cppreference",
+      standard: "c++26",
+      path: "cpp/container/unordered_map/emplace",
+      section: null,
+    });
+    assert.doesNotMatch(overview.text, /mw-content-text/);
+    assert.doesNotMatch(overview.text, /Navbar junk/);
+    assert.doesNotMatch(overview.text, /Footer junk/);
+    assert.match(overview.text, /emplace\(\)/);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
 });
 
 test("CppResearch enforces primary-first lock, source receipts, and resolves C++ symbols via clangd", async () => {

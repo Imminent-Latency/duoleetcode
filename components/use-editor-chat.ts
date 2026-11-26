@@ -2,6 +2,33 @@
 import { useEffect, useState } from "react";
 import type { EditorContextDraft, EditorSelection } from "@/lib/types";
 import { languageConfig, type LanguageId } from "@/lib/languages";
+function sameSelection(a?: EditorSelection, b?: EditorSelection): boolean {
+  return (
+    a === b ||
+    (!!a &&
+      !!b &&
+      a.startLine === b.startLine &&
+      a.startColumn === b.startColumn &&
+      a.endLine === b.endLine &&
+      a.endColumn === b.endColumn &&
+      a.text === b.text)
+  );
+}
+function sameContext(
+  a?: EditorContextDraft,
+  b?: EditorContextDraft,
+): boolean {
+  return (
+    a === b ||
+    (!!a &&
+      !!b &&
+      a.file === b.file &&
+      a.cursor.line === b.cursor.line &&
+      a.cursor.column === b.cursor.column &&
+      a.cursor.lineText === b.cursor.lineText &&
+      sameSelection(a.selection, b.selection))
+  );
+}
 export function useEditorChat(source: string, language: LanguageId = "java") {
   const [observed, setObserved] = useState<{
     source: string;
@@ -16,10 +43,16 @@ export function useEditorChat(source: string, language: LanguageId = "java") {
   const selection =
     attached?.source === source ? attached.selection : undefined;
   useEffect(() => {
-    setAttached(undefined);
-  }, [source]);
-  const onChange = (context: EditorContextDraft) =>
-    setObserved({ source, context });
+    if (attached && attached.source !== source) setAttached(undefined);
+  }, [attached, source]);
+  const onChange = (context: EditorContextDraft, contextSource = source) =>
+    setObserved((prev) =>
+      prev &&
+      prev.source === contextSource &&
+      sameContext(prev.context, context)
+        ? prev
+        : { source: contextSource, context },
+    );
   const attach = (context = current) =>
     setAttached(
       context?.selection ? { source, selection: context.selection } : undefined,
