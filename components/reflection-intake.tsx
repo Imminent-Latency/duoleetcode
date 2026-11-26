@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
 import {
-  Badge,
   Button,
   Group,
   Radio,
@@ -108,11 +107,8 @@ export default function ReflectionIntakeForm({
       aria-label="Initial reflection"
     >
       <div className="reflection-intake-heading">
-        <Badge variant="light" mb="sm">
-          Before we reflect
-        </Badge>
         <Title order={2} size="h3">
-          Start with your perspective.
+          Quick check-in
         </Title>
         <Text c="dimmed" size="sm" mt="xs">
           Review your solution, then share three quick answers.

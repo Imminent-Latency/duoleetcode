@@ -63,7 +63,6 @@ import {
   Timer,
   TrendingUp,
   X,
-  Zap,
 } from "lucide-react";
 import { api, bridge, mergeJob, Recorder } from "@/lib/browser";
 import {
@@ -461,10 +460,10 @@ export default function Workspace() {
         await reload();
         setNotice(
           expired
-            ? "Time is up. Your work is saved — let’s take one useful thing from it."
+            ? "Time is up. Attempt saved."
             : accepted
-              ? "Accepted — your assessment is saved. Let’s review what you learned."
-              : "Attempt saved. Take a look at the moments that mattered.",
+              ? "Accepted. Attempt saved."
+              : "Attempt saved.",
         );
       } catch (e) {
         showError(e);
@@ -805,8 +804,8 @@ export default function Workspace() {
         setError("");
         setNotice(
           connection.kind === "signed-out"
-            ? "Sign in to LeetCode in the popup window — it will close and connect automatically once you're in."
-            : "Complete verification in the LeetCode popup — it will close and connect automatically once cleared.",
+            ? "Sign in to LeetCode in the popup window. It will close automatically once signed in."
+            : "Complete verification in the LeetCode popup. It will close automatically once cleared.",
         );
         stopLoginWatchRef.current = watchLeetCodeLogin({
           popup: null,
@@ -833,7 +832,7 @@ export default function Workspace() {
         awaitingLeetCodeLogin.current = true;
         setError("");
         setNotice(
-          "Sign in to LeetCode in the popup window — reload DuoLeetCode Local Bridge once in chrome://extensions so sign-in popups can close themselves automatically.",
+          "Sign in to LeetCode in the popup window. Reload DuoLeetCode Local Bridge in chrome://extensions for automatic popup closing.",
         );
         stopLoginWatchRef.current = watchLeetCodeLogin({
           popup,
@@ -1111,18 +1110,14 @@ export default function Workspace() {
           </span>
           <span>
             duoleet<span className="brand-light">code</span>
-            <small>SMALL STEPS. SHARPER THINKING.</small>
           </span>
         </Button>
-        <div className="workspace-label">
-          YOUR WORKSPACE <span>LOCAL</span>
-        </div>
         <nav>
           {(
             [
               { id: "today", label: "Today", icon: Compass },
               { id: "catalog", label: "Problem library", icon: BookOpen },
-              { id: "history", label: "Your progress", icon: TrendingUp },
+              { id: "history", label: "Progress", icon: TrendingUp },
               { id: "memory", label: "Coach memory", icon: MessageCircle },
               { id: "data", label: "Snapshots & data", icon: History },
               { id: "connections", label: "Connections", icon: Link2 },
@@ -1161,8 +1156,8 @@ export default function Workspace() {
               );
             }}
           >
-            <span className="eyebrow">
-              {live ? "SESSION IN PROGRESS" : "YOUR LATEST SESSION"}
+            <span className="session-status">
+              {live ? "In progress" : "Latest session"}
             </span>
             <strong>{attempt.problem.title}</strong>
             <span>
@@ -1183,29 +1178,6 @@ export default function Workspace() {
             <ArrowUpRight size={17} />
           </Button>
         )}
-        <div className="sidebar-bottom">
-          <div className="loop-mini">
-            <span>Practice</span>
-            <ArrowRight size={12} />
-            <span>Learn</span>
-            <ArrowRight size={12} />
-            <span>Iterate</span>
-          </div>
-          <p>
-            Progress is a practice.
-            <br />
-            You can start small.
-          </p>
-          <div className="profile">
-            <span className="avatar">L</span>
-            <div>
-              <strong>Your learning space</strong>
-              <small>
-                <span className="status-dot" /> Saved on this device
-              </small>
-            </div>
-          </div>
-        </div>
       </aside>
       <main
         className={view === "attempt" ? "app-main main-session" : "app-main"}
@@ -1221,7 +1193,7 @@ export default function Workspace() {
                   : view === "catalog"
                     ? "Problem library"
                     : view === "history"
-                      ? "Your progress"
+                      ? "Progress"
                       : view === "connections"
                         ? "Connections"
                         : view === "memory"
@@ -1316,28 +1288,11 @@ export default function Workspace() {
         )}
         {view === "today" && (
           <div className="page-content">
-            <div className="page-heading">
+            <div className="page-heading compact">
               <div>
-                <div className="eyebrow">
-                  <span className="tiny-line" /> BUILD A LITTLE MOMENTUM
-                </div>
-                <h1>
-                  One session.
-                  <br />
-                  <span>One step forward.</span>
-                </h1>
-                <p>
-                  A focused challenge, a useful insight, and a clear next step.
-                </p>
+                <h1>Today</h1>
               </div>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-end",
-                  gap: 10,
-                }}
-              >
+              <div className="page-heading-actions">
                 <div className="date-chip">
                   <span>
                     {new Date(now).toLocaleDateString(undefined, {
@@ -1402,116 +1357,8 @@ export default function Workspace() {
                 onConnect={() => navigate("connections")}
                 onBridgeAction={connect}
               />
-              <Panel className="panel intention-card">
-                <span className="eyebrow">THE IDEA</span>
-                <h3>
-                  Finish with an insight.
-                  <br />
-                  Not another hour.
-                </h3>
-                <p>
-                  Work within a timebox. See how your solution evolved. Take one
-                  small skill into the next session.
-                </p>
-                <div className="intention-bottom">
-                  <span className="round-icon">
-                    <Zap size={20} />
-                  </span>
-                  <span>
-                    Consistency grows from
-                    <br />
-                    <strong>sessions you want to return to.</strong>
-                  </span>
-                </div>
-              </Panel>
-            </div>
-            {!state?.sandboxMode && state?.ratings && (
-              <TodayRatingCard
-                ratings={state.ratings as RatingsProfileDto}
-                onRetryDrain={async () => {
-                  try {
-                    await api("/api/ratings", { action: "retry-drain" });
-                    await reload();
-                  } catch (e) {
-                    showError(e);
-                  }
-                }}
-                onOpenAttempt={open}
-              />
-            )}
-            <div className="section-heading">
-              <h2>Your practice, with a feedback loop.</h2>
-              <span>THREE SMALL STEPS</span>
-            </div>
-            <div className="steps-grid">
-              {[
-                {
-                  n: "01",
-                  icon: Timer,
-                  title: "Give it a focused try",
-                  body: "An independent, timed attempt. Completion and normal test feedback stay available.",
-                },
-                {
-                  n: "02",
-                  icon: History,
-                  title: "See the moments that matter",
-                  body: "Replay your code, inspect the evidence, and add context where the story is unclear.",
-                },
-                {
-                  n: "03",
-                  icon: Target,
-                  title: "Make the next step smaller",
-                  body: "A short follow-up turns a gap into something concrete to practice.",
-                },
-              ].map((s) => (
-                <Panel className="step-card" key={s.n}>
-                  <div>
-                    <s.icon size={21} />
-                    <span>{s.n}</span>
-                  </div>
-                  <h3>{s.title}</h3>
-                  <p>{s.body}</p>
-                </Panel>
-              ))}
-            </div>
-            <div className="bottom-grid">
-              <Panel className="panel progress-preview">
-                <div className="section-heading">
-                  <h3>A little more evidence, every time</h3>
-                  <Button
-                    className="text-button"
-                    onClick={() => navigate("history")}
-                  >
-                    View progress <ArrowUpRight size={14} />
-                  </Button>
-                </div>
-                <div className="mini-stats">
-                  <div>
-                    <strong>
-                      {completed.length.toString().padStart(2, "0")}
-                    </strong>
-                    <span>assessments finished</span>
-                  </div>
-                  <div>
-                    <strong>
-                      {(
-                        state?.followups.filter((s: any) => s.hasResponse)
-                          .length ?? 0
-                      )
-                        .toString()
-                        .padStart(2, "0")}
-                    </strong>
-                    <span>focused skills revisited</span>
-                  </div>
-                </div>
-                <p>
-                  {completed.length
-                    ? "Your history separates successful submissions, independent practice, and supported recall."
-                    : "Your story starts with one session. We’ll show real evidence here as you practice."}
-                </p>
-              </Panel>
               <Panel className="panel setup-preview">
-                <span className="eyebrow">READY WHEN YOU ARE</span>
+                <h3>Connections</h3>
                 <ConnectionLine
                   ok={connection.isSignedIn}
                   tone={
@@ -1535,7 +1382,7 @@ export default function Workspace() {
                 )}
                 <ConnectionLine
                   ok={!!agentStatus?.signedIn}
-                  label="Your AI coach"
+                  label="AI runtime"
                   detail={
                     agentStatus?.signedIn
                       ? `Connected (${agentStatus.provider || "Local AI"})`
@@ -1548,6 +1395,52 @@ export default function Workspace() {
                 >
                   Manage connections <ArrowRight size={14} />
                 </Button>
+              </Panel>
+            </div>
+            <div className="bottom-grid">
+              {!state?.sandboxMode && state?.ratings && (
+                <TodayRatingCard
+                  ratings={state.ratings as RatingsProfileDto}
+                  onRetryDrain={async () => {
+                    try {
+                      await api("/api/ratings", { action: "retry-drain" });
+                      await reload();
+                    } catch (e) {
+                      showError(e);
+                    }
+                  }}
+                  onOpenAttempt={open}
+                />
+              )}
+              <Panel className="panel progress-preview">
+                <div className="section-heading">
+                  <h3>Progress</h3>
+                  <Button
+                    className="text-button"
+                    onClick={() => navigate("history")}
+                  >
+                    View progress <ArrowUpRight size={14} />
+                  </Button>
+                </div>
+                <div className="mini-stats">
+                  <div>
+                    <strong>
+                      {completed.length.toString().padStart(2, "0")}
+                    </strong>
+                    <span>assessments finished</span>
+                  </div>
+                  <div>
+                    <strong>
+                      {(
+                        state?.followups.filter((s: any) => s.hasResponse)
+                          .length ?? 0
+                      )
+                        .toString()
+                        .padStart(2, "0")}
+                    </strong>
+                    <span>follow-ups answered</span>
+                  </div>
+                </div>
               </Panel>
             </div>
           </div>
@@ -1596,9 +1489,7 @@ export default function Workspace() {
           <div className="page-content">
             <div className="page-heading compact">
               <div>
-                <span className="eyebrow">ON THIS DEVICE</span>
-                <h1>Your connections</h1>
-                <p>A local workspace, with your existing accounts.</p>
+                <h1>Connections</h1>
               </div>
             </div>
             <div className="connections-grid">
@@ -1608,8 +1499,8 @@ export default function Workspace() {
                 </span>
                 <h2>LeetCode</h2>
                 <p>
-                  Problem descriptions, Java and C++ starter code, example
-                  tests, Run and Submit — through your regular browser.
+                  Fetches problem statements, starter code, and runs LeetCode
+                  tests through your browser.
                 </p>
                 <ConnectionLine
                   ok={connection.isSignedIn}
@@ -1806,15 +1697,13 @@ export default function Workspace() {
                 <span className="large-icon">
                   <FlaskConical />
                 </span>
-                <h2>Try the whole flow</h2>
+                <h2>Local demo exercise</h2>
                 <p>
-                  An original local exercise lets you explore the timer,
-                  recording, timeline, and coaching without submitting to
-                  LeetCode.
+                  Offline exercise for testing the editor, timer, and review
+                  flow without LeetCode.
                 </p>
                 <p className="small">
-                  Marked as a demonstration and excluded from your progress.
-                  Remote judging is unavailable for this exercise.
+                  Excluded from progress. Remote judging unavailable.
                 </p>
                 <Button
                   className="button secondary"
@@ -1898,14 +1787,11 @@ export default function Workspace() {
             setSelected(undefined);
             setSelectedPrescription(undefined);
           }}
-          title="Make room for one attempt."
+          title="Start assessment"
           size={540}
           className="duo-prepare-modal"
           closeButtonProps={{ "aria-label": "Close preparation" }}
         >
-          <span className="pill mint">
-            <Timer size={14} /> BEFORE YOU BEGIN
-          </span>
           <p className="modal-intro">
             {selected.title}{" "}
             <span className="difficulty">{selected.difficulty}</span>
@@ -1964,15 +1850,15 @@ export default function Workspace() {
             !testSession && (
               <p className="small">
                 {isManualTimeboxRated(selectedPrescription.minutes, minutes)
-                  ? `Within ±5 min of prescribed ${selectedPrescription.minutes} min — rated session (effective difficulty scales with clock).`
-                  : `Outside ±5 min of prescribed ${selectedPrescription.minutes} min — runs as unrated practice.`}
+                  ? `Within ±5 min of prescribed ${selectedPrescription.minutes} min: rated session.`
+                  : `Outside ±5 min of prescribed ${selectedPrescription.minutes} min: unrated practice.`}
               </p>
             )}
           {selected.questionId !== "demo" && (
             <Checkbox
               checked={testSession}
               onChange={(e) => setTestSession(e.currentTarget.checked)}
-              label="Test the app — exclude this session from my progress"
+              label="Test session (exclude from progress)"
             />
           )}
           {testSession && (
@@ -1996,10 +1882,6 @@ export default function Workspace() {
                 <LoaderCircle className="spin" size={16} />
               )}{" "}
               {sessionLanguage === "cpp" ? cppStatus : javaStatus}
-            </p>
-            <p>
-              <ShieldCheck size={16} /> Your independent attempt stays separate
-              from coaching
             </p>
           </div>
           {sessionLanguage === "cpp" && cppStatus === "C++26 unavailable" && (
@@ -2118,12 +2000,7 @@ function Catalog({
     <div className="page-content">
       <div className="page-heading compact">
         <div>
-          <span className="eyebrow">PICK A BOUNDED CHALLENGE</span>
           <h1>Problem library</h1>
-          <p>
-            Your connected LeetCode catalog. Every problem starts with a
-            timebox.
-          </p>
         </div>
         <SegmentedControl
           aria-label="Catalog language"
@@ -2752,11 +2629,8 @@ function Review({
       <div className="page-content learning-page">
         <div className="page-heading compact">
           <div>
-            <span className="eyebrow">03 / LEARN & ITERATE</span>
-            <h1>Make one thing click.</h1>
-            <p>
-              A small follow-up, built from your {a.problem.title} assessment.
-            </p>
+            <h1>Focused practice</h1>
+            <p>Follow-up from {a.problem.title}.</p>
           </div>
           <Button
             className="text-button"
@@ -2786,8 +2660,7 @@ function Review({
           }}
         />
         <Panel className="panel learning-summary" id="learning-review">
-          <span className="eyebrow">ASSESSMENT FEEDBACK</span>
-          <h3>{a.problem.title}</h3>
+          <h3>Assessment feedback: {a.problem.title}</h3>
           <p>{evaluation?.summary}</p>
           <Findings evaluation={evaluation} />
           <ResearchSources research={evaluation?.research} />
@@ -2871,7 +2744,7 @@ function Findings({
   return (
     <div className="findings-grid">
       <div>
-        <span className="eyebrow positive">WHAT YOU DEMONSTRATED</span>
+        <h4 className="finding-heading positive">Demonstrated</h4>
         {evaluation?.strengths.map((f, i) => (
           <div className="finding" key={i}>
             <CheckCircle2 size={17} />
@@ -2894,7 +2767,7 @@ function Findings({
         )}
       </div>
       <div>
-        <span className="eyebrow amber-text">WHERE TO FOCUS NEXT</span>
+        <h4 className="finding-heading amber-text">Focus next</h4>
         {evaluation?.gaps.map((f, i) => (
           <div className="finding" key={i}>
             <Target size={17} />
@@ -2942,35 +2815,27 @@ function Progress({
     <div className="page-content">
       <div className="page-heading compact">
         <div>
-          <span className="eyebrow">PROGRESS YOU CAN POINT TO</span>
-          <h1>A record of getting better.</h1>
-          <p>
-            Observed work, independent recall, and the skills worth revisiting.
-          </p>
+          <h1>Progress</h1>
         </div>
       </div>
       <div className="stats-grid">
         <Panel className="panel">
-          <span className="eyebrow">ASSESSMENTS</span>
+          <span className="stat-label">Assessments</span>
           <strong>{real.length}</strong>
-          <p>One attempt per session</p>
         </Panel>
         <Panel className="panel">
-          <span className="eyebrow">ACCEPTED SOLUTIONS</span>
+          <span className="stat-label">Accepted</span>
           <strong>{accepted.length}</strong>
-          <p>Confirmed by LeetCode</p>
         </Panel>
         <Panel className="panel">
-          <span className="eyebrow">DAYS PRACTICED</span>
+          <span className="stat-label">Days practiced</span>
           <strong>{days}</strong>
-          <p>Every return counts</p>
         </Panel>
         <Panel className="panel">
-          <span className="eyebrow">FOCUSED FOLLOW-UPS</span>
+          <span className="stat-label">Follow-ups</span>
           <strong>
             {state?.followups.filter((s: any) => s.hasResponse).length ?? 0}
           </strong>
-          <p>First responses preserved</p>
         </Panel>
       </div>
       {state?.ratings && (

@@ -174,7 +174,7 @@ export default function FocusedLearning({
           )
         ) : (
           <>
-            <span className="eyebrow">YOUR FIRST RESPONSE · PRESERVED</span>
+            <span className="stat-label">First response</span>
             <pre className="answer-snapshot">{followup.answer}</pre>
             {followup.feedback &&
               followup.feedback !==
@@ -363,8 +363,8 @@ export default function FocusedLearning({
           className={`panel session-check ${sufficient ? "ready" : ""}`}
           aria-live="polite"
         >
-          <span className="eyebrow">
-            {closed ? "SESSION ENDED" : "THIS SESSION"}
+          <span className="stat-label">
+            {closed ? "Session ended" : "This session"}
           </span>
           <h3>
             {closed
@@ -375,7 +375,7 @@ export default function FocusedLearning({
                   : "You chose to move on"
               : sufficient
                 ? "Enough evidence to move on"
-                : "Understanding, one step at a time"}
+                : "Working through the concept"}
           </h3>
           {understanding ? (
             <>
@@ -468,7 +468,7 @@ export default function FocusedLearning({
         </Panel>
         {closed && (
           <Panel className="panel next-card">
-            <span className="eyebrow">YOUR NEXT STEP</span>
+            <span className="stat-label">Next step</span>
             <h3>A problem chosen from your practice</h3>
             <p>
               Return to Today for a timed problem selected using your latest
@@ -480,7 +480,7 @@ export default function FocusedLearning({
           </Panel>
         )}
         <Panel className="panel">
-          <span className="eyebrow">WHY THIS EXERCISE</span>
+          <span className="stat-label">Focus skill</span>
           <h3>{evaluation?.exercise.skill}</h3>
           <p>
             {evaluation?.gaps[0]?.observation ??

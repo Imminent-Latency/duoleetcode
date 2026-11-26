@@ -174,12 +174,8 @@ export default function DataManagement({
     <div className="page-content">
       <div className="page-heading compact">
         <div>
-          <span className="eyebrow">SAVE A POINT TO COME BACK TO</span>
           <h1>Snapshots & data</h1>
-          <p>
-            Keep a copy, review it later, and choose what belongs in your next
-            fresh start.
-          </p>
+          <p>Export, restore, or reset local practice data.</p>
         </div>
       </div>
       <Stack gap="lg">
@@ -350,7 +346,7 @@ export default function DataManagement({
                     {
                       value: "coaching",
                       label:
-                        "Clear coaching only — keep solutions, recordings, and judge results",
+                        "Clear coaching only (keep solutions, recordings, and judge results)",
                     },
                   ]}
                 />

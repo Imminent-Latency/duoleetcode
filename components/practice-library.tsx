@@ -296,7 +296,7 @@ function ImportPreview() {
       <div className="library-preview-grid">
         {data.rows.map((r) => (
           <Panel className="panel" key={r.key}>
-            <span className="eyebrow">
+            <span className="small text-muted">
               {kindNames[r.kind] ?? r.kind} · {r.date ?? "Date unknown"}
             </span>
             <h3>{r.title}</h3>
@@ -514,7 +514,7 @@ export function SavedSession({
               <details className="library-evidence" key={j.id}>
                 <summary>
                   {j.kind === "run" ? "Run" : "Submission"} {i + 1} ·{" "}
-                  {j.summary?.verdict ?? j.state} · event {j.seq} — exact code
+                  {j.summary?.verdict ?? j.state} · event {j.seq} · exact code
                 </summary>
                 <pre className="library-code">{j.source}</pre>
               </details>

@@ -639,7 +639,7 @@ export function TimelineInspectorCard({
                       <span className="timeline-subtag">
                         {q.topic} · {q.kind}
                       </span>{" "}
-                      <strong>{q.question}</strong> —{" "}
+                      <strong>{q.question}</strong>:{" "}
                       <span className="muted-inline">{q.purpose}</span>{" "}
                       {q.sequences.map((s) => (
                         <button
@@ -739,7 +739,7 @@ export function TimelineInspectorCard({
           <>
             <p>
               <strong>{item.reviewFlag.category}</strong> ({item.reviewFlag.targetKind} ·{" "}
-              {item.reviewFlag.status === "resolved" ? "Reviewed" : "Open"}) —{" "}
+              {item.reviewFlag.status === "resolved" ? "Reviewed" : "Open"}):{" "}
               {item.reviewFlag.note || "No note added."}
             </p>
             {item.reviewFlag.editor && (

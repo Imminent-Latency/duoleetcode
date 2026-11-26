@@ -109,11 +109,10 @@ export function TodayRatingCard({
     <Panel className="panel rating-summary-card">
       <div className="section-heading">
         <div>
-          <span className="eyebrow">SKILL CALIBRATION</span>
           <h3>
             {ratings.revealed
-              ? `Baseline Rating: ${ratings.revealText}`
-              : `Calibrating your baseline (${ratings.prescribedGradedCount} of ${ratings.calibrationTarget})`}
+              ? `Skill rating: ${ratings.revealText}`
+              : `Rating calibration (${ratings.prescribedGradedCount} of ${ratings.calibrationTarget})`}
           </h3>
         </div>
         <span className="small text-muted">{syncedText}</span>
@@ -166,7 +165,7 @@ export function TodayRatingCard({
       )}
       {ratings.deferredReflections.length > 0 && (
         <div className="deferred-reflections-list">
-          <span className="eyebrow">PENDING REFLECTIONS</span>
+          <span className="stat-label">Pending reflections</span>
           {ratings.deferredReflections.map((item) => (
             <Button
               key={item.attemptId}
@@ -234,25 +233,25 @@ export function ProgressSkillProfile({
         <h2>Skill ratings &amp; complexity calibration</h2>
         <span>
           {ratings.revealed
-            ? `GLOBAL ${ratings.revealText}`
-            : `CALIBRATING (${ratings.prescribedGradedCount}/4)`}
+            ? `Global ${ratings.revealText}`
+            : `Calibrating (${ratings.prescribedGradedCount}/4)`}
         </span>
       </div>
       <div className="stats-grid">
         <Panel className="panel">
-          <span className="eyebrow">GLOBAL SKILL</span>
+          <span className="stat-label">Global skill</span>
           <strong>{ratings.revealed ? ratings.revealText : "Calibrating"}</strong>
           <p>{ratings.prescribedGradedCount} prescribed attempts graded</p>
         </Panel>
         <Panel className="panel">
-          <span className="eyebrow">TIME COMPLEXITY</span>
+          <span className="stat-label">Time complexity</span>
           <strong>{ratings.complexityCalibration.time.formatted}</strong>
           <p>Separate from domain ratings</p>
         </Panel>
         <Panel className="panel">
-          <span className="eyebrow">SPACE COMPLEXITY</span>
+          <span className="stat-label">Space complexity</span>
           <strong>{ratings.complexityCalibration.space.formatted}</strong>
-          <p>Counts exclude unsure answers cleanly</p>
+          <p>Counts exclude unsure answers</p>
         </Panel>
       </div>
 
@@ -261,7 +260,6 @@ export function ProgressSkillProfile({
           <h3>
             <Sliders size={16} /> Practice focus &amp; time cap
           </h3>
-          <span>SLOT 0 DEDICATED TO ELIGIBLE FOCUS DOMAINS</span>
         </div>
         <div className="director-prefs-grid">
           <MultiSelect
@@ -304,7 +302,7 @@ export function ProgressSkillProfile({
       <Panel className="panel">
         <div className="section-heading">
           <h3>13 Domain Ratings</h3>
-          <span>IMPLEMENTATION &amp; PATTERN SELECTION</span>
+          <span>Implementation &amp; selection</span>
         </div>
         <div className="domain-ratings-table">
           {ratings.domains.map((d) => (
@@ -316,11 +314,11 @@ export function ProgressSkillProfile({
               </div>
               <div className="domain-rating-metrics">
                 <span>
-                  Impl: <strong>{ratings.revealed ? d.implDisplay : "—"}</strong>{" "}
+                  Impl: <strong>{ratings.revealed ? d.implDisplay : "-"}</strong>{" "}
                   <small>(±{d.implSigma})</small>
                 </span>
                 <span>
-                  Select: <strong>{ratings.revealed ? d.selDisplay : "—"}</strong>{" "}
+                  Select: <strong>{ratings.revealed ? d.selDisplay : "-"}</strong>{" "}
                   <small>(±{d.selSigma})</small>
                 </span>
               </div>
@@ -334,7 +332,7 @@ export function ProgressSkillProfile({
           <h3>
             <ShieldCheck size={16} /> Track B Concept Retention (24 Concepts)
           </h3>
-          <span>SPACED STABILITY IN DAYS</span>
+          <span>Stability in days</span>
         </div>
         <div className="concept-stability-grid">
           {ratings.concepts.map((c) => (

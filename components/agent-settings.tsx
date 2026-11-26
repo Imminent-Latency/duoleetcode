@@ -116,7 +116,6 @@ export default function AgentSettings({
     <div className="page-content">
       <div className="page-heading compact">
         <div>
-          <span className="eyebrow">PLATFORM PREFERENCES</span>
           <h1>Settings</h1>
           <p>
             Default language and AI learning team preferences. Custom gives you
@@ -266,7 +265,7 @@ export default function AgentSettings({
                   if (!fiveHour || !thirtyDay) return null;
                   return (
                     <Text size="xs" c="dimmed">
-                      Practice usage — Last 5h: {fiveHour.calls.toLocaleString()}{" "}
+                      Practice usage: Last 5h: {fiveHour.calls.toLocaleString()}{" "}
                       calls ({fiveHour.totalTokens.toLocaleString()} tokens) ·
                       Last 30d: {thirtyDay.calls.toLocaleString()} calls (
                       {thirtyDay.totalTokens.toLocaleString()} tokens
@@ -289,7 +288,7 @@ export default function AgentSettings({
                       Pairs each provider’s flagship reasoning model at Low
                       effort for nuanced reflection, evaluation, and coaching
                       with its fast coding model at Low effort for live reference
-                      help and problem selection — or customize any individual
+                      help and problem selection, or customize any individual
                       model below.
                     </Text>
                   </div>

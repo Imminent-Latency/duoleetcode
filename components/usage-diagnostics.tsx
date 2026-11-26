@@ -219,7 +219,7 @@ export default function UsageDiagnostics() {
               <Title order={2} mt={4}>
                 {current.sessions
                   ? `${current.avgCallsPerSession} calls`
-                  : "—"}
+                  : "-"}
               </Title>
               <Text size="xs" c="dimmed" mt={4}>
                 {current.sessions

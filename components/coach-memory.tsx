@@ -128,12 +128,8 @@ export default function CoachMemory({
     <div className="page-content">
       <div className="page-heading compact">
         <div>
-          <span className="eyebrow">YOUR COACH, YOUR CONTEXT</span>
           <h1>Coach memory</h1>
-          <p>
-            See what your coach remembers, where it came from, and change what
-            it uses.
-          </p>
+          <p>Preferences and skill evidence used by the coach.</p>
         </div>
       </div>
       <Stack gap="lg">

@@ -8,7 +8,6 @@ import {
   Eye,
   LoaderCircle,
   RefreshCw,
-  Sparkles,
   Timer,
 } from "lucide-react";
 import { Button, Panel } from "./ui";
@@ -219,27 +218,21 @@ export default function ProblemPrescription({
 
   return (
     <Panel className="recommendation-card prescription-card">
-      <div className="card-topline">
-        <span className="pill mint">
-          <Sparkles size={13} />{" "}
-          {continuation?.gateReason === "unsettled-checkin"
-            ? "CHECK-IN REQUIRED"
-            : "YOUR NEXT STEP"}
-        </span>
-        <span className="text-muted">01 / PRACTICE</span>
-      </div>
+      {continuation?.gateReason === "unsettled-checkin" && (
+        <div className="card-topline">
+          <span className="pill warn">Check-in required</span>
+        </div>
+      )}
       <h2>
         {continuation?.title ??
-          (loading
-            ? "Choosing your next challenge"
-            : (p?.title ?? "A problem picked for you"))}
+          (loading ? "Choosing your next challenge" : (p?.title ?? "Next problem"))}
       </h2>
       <p className="recommendation-description">
         {continuation?.reason ??
           (loading
             ? status.job?.stage || "Matching your skill profile with a timed problem from LeetCode."
             : (p?.reason ??
-              `Your skill profile helps choose one useful, timed ${cfg.shortLabel} challenge.`))}
+              `Pick a timed ${cfg.shortLabel} problem from your connected LeetCode account.`))}
       </p>
       {!continuation && !loading && p?.overrideWarning && (
         <p className="small">{p.overrideWarning}</p>
@@ -304,8 +297,8 @@ export default function ProblemPrescription({
             ) : (
               <div className="prescription-spoiler-gate">
                 <span className="small">
-                  Pattern Selection challenge — the target domain is hidden so you
-                  can diagnose the strategy yourself.
+                  Pattern selection challenge: target domain is hidden so you
+                  choose the strategy yourself.
                 </span>
                 <Button
                   className="text-button"
@@ -330,7 +323,7 @@ export default function ProblemPrescription({
         bridgeConnection.kind !== "checking" && (
           <p className="small">
             {!bridgeConnection.isSignedIn
-              ? `${bridgeConnection.label} — ${bridgeConnection.detail}`
+              ? `${bridgeConnection.label}. ${bridgeConnection.detail}`
               : !agentSignedIn && !p
                 ? "ChatGPT sign-in needed to choose a personalized next problem."
                 : ""}
@@ -389,7 +382,6 @@ export default function ProblemPrescription({
             </Button>
           )
         )}
-        {!loading && <span>The clock starts when you’re ready.</span>}
       </div>
       {!continuation && (
         <div className="prescription-actions">

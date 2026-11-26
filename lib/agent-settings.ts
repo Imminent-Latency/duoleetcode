@@ -44,9 +44,9 @@ export type AgentRole =
   (typeof agentFeatures)[number]["role"] | "connection check";
 export const agentPresets = [
   { value: "low", label: "Low", enabled: true },
-  { value: "balanced", label: "Balanced — not tuned yet", enabled: false },
-  { value: "optimal", label: "Optimal — not tuned yet", enabled: false },
-  { value: "thirsty", label: "Thirsty — not tuned yet", enabled: false },
+  { value: "balanced", label: "Balanced (not tuned yet)", enabled: false },
+  { value: "optimal", label: "Optimal (not tuned yet)", enabled: false },
+  { value: "thirsty", label: "Thirsty (not tuned yet)", enabled: false },
   { value: "custom", label: "Custom", enabled: true },
 ] as const;
 export const agentChoiceSchema = z

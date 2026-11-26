@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Button, Panel } from "./ui";
 import { api } from "@/lib/browser";
 import {
@@ -54,9 +54,7 @@ export default function WelcomeOnboarding({
   return (
     <Panel className="panel welcome-onboarding-card">
       <div className="card-topline">
-        <span className="pill mint">
-          <Sparkles size={13} /> WELCOME TO YOUR PRACTICE
-        </span>
+        <h2>Starting difficulty</h2>
         <Button
           className="text-button"
           disabled={!!busy}
@@ -65,11 +63,9 @@ export default function WelcomeOnboarding({
           Skip (default: Foundations)
         </Button>
       </div>
-      <h2>Where should Session #1 begin?</h2>
       <p className="recommendation-description">
-        Pick a starting comfort band for your first problem. We calibrate your real
-        baseline across 4 adaptive sessions without inflating or penalizing your
-        prior rating.
+        Choose a starting difficulty band for your first session. Your rating
+        calibrates over 4 timed sessions.
       </p>
       <div className="tier-picker-grid">
         {tiers.map((tier) => {

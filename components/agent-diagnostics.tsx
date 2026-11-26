@@ -186,7 +186,6 @@ function TraceDiagnostics({
     <section className="diagnostics-page">
       <div className="section-heading">
         <div>
-          <span className="eyebrow">LOCAL DEVELOPMENT</span>
           <h1>Agent diagnostics</h1>
           <p>
             Inspect what each agent received, the tools it used, and how its
