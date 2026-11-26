@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  DEFAULT_LANGUAGE,
+  languageIdSchema,
+  type LanguageId,
+} from "./languages";
 
 // Every production harness registers here and resolves the same platform preset.
 // Model identifiers/effort values stay provider-neutral; adapters advertise support.
@@ -84,6 +89,16 @@ export function normalizeBackgroundSettings(
     ? undefined
     : { ...background };
 }
+export function resolveDefaultLanguage(
+  settings?: { defaultLanguage?: LanguageId } | null,
+): LanguageId {
+  return settings?.defaultLanguage ?? DEFAULT_LANGUAGE;
+}
+export function normalizeDefaultLanguage(
+  language?: LanguageId,
+): LanguageId | undefined {
+  return !language || language === DEFAULT_LANGUAGE ? undefined : language;
+}
 export const agentSettingsSchema = z
   .object({
     version: z.literal(1),
@@ -98,6 +113,7 @@ export const agentSettingsSchema = z
       })
       .strict(),
     background: backgroundSettingsSchema.optional(),
+    defaultLanguage: languageIdSchema.optional(),
   })
   .strict();
 export type AgentSettings = z.infer<typeof agentSettingsSchema>;

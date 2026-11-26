@@ -142,6 +142,7 @@ export default function Workspace() {
   const lastAutoBridgeCheckAt = useRef(0);
   const [agentStatus, setAgentStatus] = useState<any>();
   const [preferredLanguage, setPreferredLanguage] = useState<LanguageId>("java");
+  const languageOverridden = useRef(false);
   const [sessionLanguage, setSessionLanguage] = useState<LanguageId>("java");
   const [javaStatus, setJavaStatus] = useState("Warming Java…");
   const [cppStatus, setCppStatus] = useState("Not loaded");
@@ -178,6 +179,7 @@ export default function Workspace() {
     preferredLanguage,
   );
   const updatePreferredLanguage = (next: LanguageId) => {
+    languageOverridden.current = true;
     setPreferredLanguage(next);
     try {
       localStorage.setItem(PREFERRED_LANGUAGE_KEY, next);
@@ -270,8 +272,24 @@ export default function Workspace() {
     }
   }, []);
   useEffect(() => {
+    let initialLang: LanguageId = "java";
+    try {
+      initialLang = normalizeLanguage(localStorage.getItem(PREFERRED_LANGUAGE_KEY));
+      setPreferredLanguage(initialLang);
+    } catch {}
     void reload()
       .then((data) => {
+        if (data.defaultLanguage && !languageOverridden.current) {
+          const serverLang = normalizeLanguage(data.defaultLanguage);
+          setPreferredLanguage(serverLang);
+          try {
+            localStorage.setItem(PREFERRED_LANGUAGE_KEY, serverLang);
+          } catch {}
+          if (serverLang !== initialLang) {
+            if (serverLang === "cpp") void cpp().prepare().catch(() => {});
+            else void java().prepare().catch(() => {});
+          }
+        }
         const params = new URLSearchParams(window.location.search);
         const attemptParam = params.get("attempt");
         const traceId = params.get("trace");
@@ -307,11 +325,6 @@ export default function Workspace() {
       connectionRef.current = next;
       setConnection(next);
     });
-    let initialLang: LanguageId = "java";
-    try {
-      initialLang = normalizeLanguage(localStorage.getItem(PREFERRED_LANGUAGE_KEY));
-      setPreferredLanguage(initialLang);
-    } catch {}
     const engine = java();
     const cppEngine = cpp();
     const listener = () => setJavaStatus(engine.state);
@@ -1041,7 +1054,7 @@ export default function Workspace() {
               { id: "diagnostics", label: "Agent diagnostics", icon: Code2 },
               {
                 id: "settings",
-                label: "Agent settings",
+                label: "Settings",
                 icon: SlidersHorizontal,
               },
             ] as const
@@ -1141,7 +1154,7 @@ export default function Workspace() {
                           : view === "data"
                             ? "Snapshots & data"
                             : view === "settings"
-                              ? "Agent settings"
+                              ? "Settings"
                               : attempt?.phase === "active"
                                 ? "Assessment"
                                 : "Your session"}
@@ -1447,7 +1460,9 @@ export default function Workspace() {
           />
         )}
         {view === "history" && <Progress state={state} onOpen={open} />}
-        {view === "settings" && <AgentSettings />}
+        {view === "settings" && (
+          <AgentSettings onDefaultLanguageChange={updatePreferredLanguage} />
+        )}
         {view === "diagnostics" && (
           <AgentDiagnostics
             initialId={diagnosticId}

@@ -7,7 +7,9 @@ import {
   agentFeatures,
   agentSettingsSchema,
   lowSettings,
+  normalizeDefaultLanguage,
   resolveAgentChoice,
+  resolveDefaultLanguage,
   validateAgentChoice,
   type AgentSettings,
 } from "../lib/agent-settings";
@@ -279,5 +281,55 @@ test("evidence audit repairs once and refuses a second unsupported reply", async
     assert.equal(candidates, 2);
     assert.equal(audits, 2);
     assert.equal(runtime.researchContexts.size, 0);
+  }
+});
+
+test("defaultLanguage persists across Low and Custom presets and normalizes default Java", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "duo-lang-settings-"));
+  const file = path.join(dir, "settings.json");
+  try {
+    const initial = readAgentSettings(file, "baseline");
+    assert.equal(resolveDefaultLanguage(initial), "java");
+    assert.equal(normalizeDefaultLanguage("java"), undefined);
+    assert.equal(normalizeDefaultLanguage("cpp"), "cpp");
+    assert.equal(initial.defaultLanguage, undefined);
+
+    const savedCppLow = saveAgentSettings(
+      { ...lowSettings("baseline"), defaultLanguage: "cpp" },
+      file,
+      "baseline",
+    );
+    assert.equal(savedCppLow.defaultLanguage, "cpp");
+    assert.equal(readAgentSettings(file, "baseline").defaultLanguage, "cpp");
+    assert.equal(
+      resolveDefaultLanguage(readAgentSettings(file, "baseline")),
+      "cpp",
+    );
+
+    const custom = lowSettings("baseline");
+    custom.preset = "custom";
+    custom.features.planning = { model: "smaller", effort: "low" };
+    custom.defaultLanguage = "cpp";
+    saveAgentSettings(custom, file, "baseline");
+    assert.equal(readAgentSettings(file, "baseline").defaultLanguage, "cpp");
+
+    saveAgentSettings(
+      { ...lowSettings("baseline"), defaultLanguage: "java" },
+      file,
+      "baseline",
+    );
+    const resetJava = readAgentSettings(file, "baseline");
+    assert.equal(resetJava.defaultLanguage, undefined);
+    assert.equal(resolveDefaultLanguage(resetJava), "java");
+    assert.deepEqual(resetJava, lowSettings("baseline"));
+
+    assert.throws(() =>
+      agentSettingsSchema.parse({
+        ...lowSettings("baseline"),
+        defaultLanguage: "python",
+      }),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

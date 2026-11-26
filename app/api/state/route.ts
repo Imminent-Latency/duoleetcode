@@ -6,7 +6,9 @@ import { latestCoaching } from "@/lib/coaching";
 import { latestReflection } from "@/lib/reflection";
 import { sandboxMode } from "@/lib/practice-storage.mjs";
 import { demoProblem } from "@/lib/demo";
-import { languageIdSchema } from "@/lib/languages";
+import { DEFAULT_LANGUAGE, languageIdSchema } from "@/lib/languages";
+import { resolveDefaultLanguage } from "@/lib/agent-settings";
+import { readAgentSettings } from "@/lib/agent-settings-store";
 import { z } from "zod";
 export const runtime = "nodejs";
 export async function GET(req: Request) {
@@ -18,9 +20,16 @@ export async function GET(req: Request) {
     const attempts = [...practice.list(), ...sandbox].sort(
       (a, b) => b.createdAt - a.createdAt,
     );
+    let defaultLanguage = DEFAULT_LANGUAGE;
+    try {
+      defaultLanguage = resolveDefaultLanguage(readAgentSettings());
+    } catch {
+      /* Keep state endpoint available if settings file is unreadable. */
+    }
     return json({
       attempts,
       sandboxMode: sandboxMode(),
+      defaultLanguage,
       importedHistory: practice.imported(),
       recommendation: recommend(history),
       skills: history.flatMap(

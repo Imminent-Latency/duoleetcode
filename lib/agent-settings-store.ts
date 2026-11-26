@@ -4,6 +4,7 @@ import {
   agentSettingsSchema,
   lowSettings,
   normalizeBackgroundSettings,
+  normalizeDefaultLanguage,
   type AgentSettings,
 } from "./agent-settings";
 
@@ -12,13 +13,23 @@ export const baselineAgentModel = () =>
 const settingsFile = () =>
   process.env.DUO_SETTINGS_FILE ||
   path.join(process.cwd(), ".local", "agent-settings.json");
-function withNormalizedBackground(
+function withNormalizedPreferences(
   base: AgentSettings,
   background?: AgentSettings["background"],
+  defaultLanguage?: AgentSettings["defaultLanguage"],
 ): AgentSettings {
-  const normalized = normalizeBackgroundSettings(background);
-  const { background: _ignored, ...rest } = base;
-  return normalized ? { ...rest, background: normalized } : rest;
+  const normalizedBg = normalizeBackgroundSettings(background);
+  const normalizedLang = normalizeDefaultLanguage(defaultLanguage);
+  const {
+    background: _ignoredBg,
+    defaultLanguage: _ignoredLang,
+    ...rest
+  } = base;
+  return {
+    ...rest,
+    ...(normalizedBg ? { background: normalizedBg } : {}),
+    ...(normalizedLang ? { defaultLanguage: normalizedLang } : {}),
+  };
 }
 export function readAgentSettings(
   file = settingsFile(),
@@ -34,9 +45,10 @@ export function readAgentSettings(
     )
       raw.features.reference = lowSettings(model).features.reference;
     const saved = agentSettingsSchema.parse(raw);
-    return withNormalizedBackground(
+    return withNormalizedPreferences(
       saved.preset === "low" ? lowSettings(model) : saved,
       saved.background,
+      saved.defaultLanguage,
     );
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT")
@@ -52,9 +64,10 @@ export function saveAgentSettings(
   model = baselineAgentModel(),
 ) {
   const parsed = agentSettingsSchema.parse(input);
-  const settings = withNormalizedBackground(
+  const settings = withNormalizedPreferences(
     parsed.preset === "low" ? lowSettings(model) : parsed,
     parsed.background,
+    parsed.defaultLanguage,
   );
   mkdirSync(path.dirname(file), { recursive: true });
   const temporary = file + "." + crypto.randomUUID() + ".tmp";

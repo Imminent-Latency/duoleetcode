@@ -7,6 +7,7 @@ import {
   Checkbox,
   Group,
   Paper,
+  SegmentedControl,
   Select,
   SimpleGrid,
   Stack,
@@ -19,14 +20,21 @@ import {
   agentPresets,
   availableTeamProfiles,
   normalizeBackgroundSettings,
+  normalizeDefaultLanguage,
   resolveBackgroundSettings,
+  resolveDefaultLanguage,
   type AgentModel,
   type AgentSettings as Settings,
   type AgentTeamProfile,
 } from "@/lib/agent-settings";
+import type { LanguageId } from "@/lib/languages";
 import type { UsageSummary } from "@/lib/agent-trace-types";
 
-export default function AgentSettings() {
+export default function AgentSettings({
+  onDefaultLanguageChange,
+}: {
+  onDefaultLanguageChange?: (lang: LanguageId) => void;
+} = {}) {
   const [settings, setSettings] = useState<Settings>();
   const [baseline, setBaseline] = useState<Settings>();
   const [saved, setSaved] = useState("");
@@ -96,7 +104,8 @@ export default function AgentSettings() {
       const data = await api("/api/agent/settings", settings);
       setSettings(data.settings);
       setSaved(JSON.stringify(data.settings));
-      setNotice("Saved. These settings apply to every new agent request.");
+      onDefaultLanguageChange?.(resolveDefaultLanguage(data.settings));
+      setNotice("Saved. These settings apply to every new session and agent request.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -108,10 +117,10 @@ export default function AgentSettings() {
       <div className="page-heading compact">
         <div>
           <span className="eyebrow">PLATFORM PREFERENCES</span>
-          <h1>Agent settings</h1>
+          <h1>Settings</h1>
           <p>
-            One preset for the whole learning team. Custom gives you control
-            over each feature.
+            Default language and AI learning team preferences. Custom gives you
+            control over each feature.
           </p>
         </div>
       </div>
@@ -124,9 +133,39 @@ export default function AgentSettings() {
             </Button>
           </Alert>
         )}
-        {!settings && !error && <Text c="dimmed">Loading agent settings…</Text>}
+        {!settings && !error && <Text c="dimmed">Loading settings…</Text>}
         {settings && (
           <>
+            <Paper withBorder radius="md" p="xl">
+              <Group justify="space-between" align="start" gap="xl">
+                <Stack gap="xs" style={{ flex: 1 }}>
+                  <Title order={2}>Default practice language</Title>
+                  <Text c="dimmed">
+                    Preselected for new LeetCode sessions, local exercises, and
+                    daily problem recommendations.
+                  </Text>
+                </Stack>
+                <SegmentedControl
+                  aria-label="Default practice language"
+                  value={resolveDefaultLanguage(settings)}
+                  disabled={busy}
+                  data={[
+                    { value: "java", label: "Java 25" },
+                    { value: "cpp", label: "C++26" },
+                  ]}
+                  onChange={(value) => {
+                    setNotice("");
+                    const nextLang = normalizeDefaultLanguage(
+                      value as LanguageId,
+                    );
+                    const { defaultLanguage: _old, ...rest } = settings;
+                    setSettings(
+                      nextLang ? { ...rest, defaultLanguage: nextLang } : rest,
+                    );
+                  }}
+                />
+              </Group>
+            </Paper>
             <Paper withBorder radius="md" p="xl">
               <Group justify="space-between" align="start" gap="xl">
                 <Stack gap="xs" style={{ flex: 1 }}>
@@ -160,9 +199,13 @@ export default function AgentSettings() {
                       const nextBg = normalizeBackgroundSettings(
                         settings.background,
                       );
+                      const nextLang = normalizeDefaultLanguage(
+                        settings.defaultLanguage,
+                      );
                       setSettings({
                         ...structuredClone(baseline),
                         ...(nextBg ? { background: nextBg } : {}),
+                        ...(nextLang ? { defaultLanguage: nextLang } : {}),
                       });
                     }
                     if (v === "custom")
@@ -183,7 +226,7 @@ export default function AgentSettings() {
                 </div>
                 <Checkbox
                   label="Background analysis while solving"
-                  description="Saves private stretch summaries, Java documentation lookups, and candidate questions at natural milestones while you code (including test sessions, tracked separately under Test usage)."
+                  description="Saves private stretch summaries, documentation lookups, and candidate questions at natural milestones while you code (including test sessions, tracked separately under Test usage)."
                   checked={resolveBackgroundSettings(settings).solvingAnalysis}
                   disabled={busy}
                   onChange={(e) => {
@@ -245,7 +288,7 @@ export default function AgentSettings() {
                     <Text size="sm" c="dimmed" mt={4}>
                       Pairs each provider’s flagship reasoning model at Low
                       effort for nuanced reflection, evaluation, and coaching
-                      with its fast coding model at Low effort for live Java
+                      with its fast coding model at Low effort for live reference
                       help and problem selection — or customize any individual
                       model below.
                     </Text>
@@ -440,7 +483,7 @@ export default function AgentSettings() {
                 loading={busy}
                 disabled={busy || JSON.stringify(settings) === saved}
               >
-                Save agent settings
+                Save settings
               </Button>
             </Group>
           </>
