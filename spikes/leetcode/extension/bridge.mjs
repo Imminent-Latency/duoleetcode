@@ -117,11 +117,14 @@ export class Bridge {
     }
     throw new Error('Unsupported extension operation');
   }
-  async start({kind,slug:problemSlug,code,input,idempotencyKey}){
+  async start({kind,slug:problemSlug,code,input,idempotencyKey,lang='java'}){
     if(!['run','submit'].includes(kind))throw new Error('Invalid judge operation');
-    slug(problemSlug);string(code,100000,'Java source');key(idempotencyKey);
+    if(!['java','cpp'].includes(lang))throw new Error('Unsupported language');
+    slug(problemSlug);string(code,100000,'source');key(idempotencyKey);
     if(kind==='run'&&input!==undefined)string(input,100000,'test input');
-    const fingerprint=await hash(JSON.stringify({kind,slug:problemSlug,code,input:kind==='run'?input:undefined}));
+    const fpPayload={kind,slug:problemSlug,code,input:kind==='run'?input:undefined};
+    if(lang!=='java')fpPayload.lang=lang;
+    const fingerprint=await hash(JSON.stringify(fpPayload));
     const records=await this.storage.get(null),existing=records[recordPrefix+idempotencyKey];
     const account=await this.auth();
     if(existing){
@@ -132,13 +135,14 @@ export class Bridge {
     if(Object.values(records).some(j=>j.account===account.username&&j.state==='judging'))throw new Error('Finish checking the active judge request first.');
     if(Object.keys(records).filter(k=>k.startsWith(recordPrefix)).length>=100)throw new Error('The local extension journal is full. Export your results before clearing extension data.');
     const problem=await this.client.problem(problemSlug);
-    if(problem.locked||!problem.javaStarter)throw new Error('This account cannot access a Java starter for this problem.');
+    const starter=lang==='cpp'?problem.cppStarter:problem.javaStarter;
+    if(problem.locked||!starter)throw new Error(`This account cannot access a ${lang==='cpp'?'C++':'Java'} starter for this problem.`);
     const testInput=kind==='run'?(input??problem.exampleInputs.raw):undefined;
     if(kind==='run')string(testInput,100000,'test input');
-    const job={id:idempotencyKey,fingerprint,account:account.username,kind,slug:problemSlug,title:problem.title,questionId:problem.questionId,sourceSha256:await hash(code),sourceBytes:new TextEncoder().encode(code).length,inputSha256:testInput?await hash(testInput):undefined,createdAt:new Date().toISOString(),state:'sending',remoteId:null};
+    const job={id:idempotencyKey,fingerprint,account:account.username,kind,lang,slug:problemSlug,title:problem.title,questionId:problem.questionId,sourceSha256:await hash(code),sourceBytes:new TextEncoder().encode(code).length,inputSha256:testInput?await hash(testInput):undefined,createdAt:new Date().toISOString(),state:'sending',remoteId:null};
     await this.save(job); // Journal before POST; never automatically replay a write.
     try{
-      const response=await this.client.execute(kind,problem,code,testInput);
+      const response=await this.client.execute(kind,problem,code,testInput,lang);
       const id=kind==='run'?response.interpret_id:response.submission_id;
       if(response.error)throw new Error(/too soon|too many|wait|rate limit/i.test(String(response.error))?'LeetCode asked us to wait before starting another judge request.':'LeetCode returned an error instead of a judge job.');
       if(id===undefined||id===null)throw new Error('LeetCode did not return a judge ID.');

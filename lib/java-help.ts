@@ -1,4 +1,5 @@
 import type { Attempt, JavaHelp, Moment } from "./types";
+import { languageConfig } from "./languages";
 export function publicJavaHelp(a: Attempt) {
   return (a.javaHelp ?? []).map((h) =>
     h.deliveredAt
@@ -26,10 +27,11 @@ export function referenceEvidence(a: Attempt) {
   }));
 }
 export function javaHelpMoments(a: Attempt): Moment[] {
+  const label = languageConfig(a.language).helpLabel;
   return (a.javaHelp ?? []).map((h) => ({
     seq: h.requestSeq,
     endSeq: h.responseSeq ?? null,
-    label: "Java help",
+    label,
     observation: `Asked: ${h.question.slice(0, 180)}${h.deliveredAt ? " · Answer delivered" : " · No answer delivered"}`,
     interpretation:
       "An API or syntax lookup alone does not establish a learning gap or use of a solution hint.",

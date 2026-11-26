@@ -20,6 +20,7 @@ DuoLeetCode is designed to be self-hosted on **`127.0.0.1`** on your own machine
 
 - **Node.js 26+** (uses built-in `node:sqlite`), **npm**, and **Git**
 - **JDK 25** (needed **once** on a fresh clone so `npm run java:prepare` can build the in-browser Java language-server JARs; normal app use runs Java inside the browser via CheerpJ)
+- **clangd** *(optional — needed for C++26 semantic completion, hover signatures, and compiler diagnostics via `-std=c++26`; on macOS, Xcode Command Line Tools provides `/usr/bin/clangd`, or install LLVM via Homebrew)*
 - **A Chromium browser** (Chrome, Chromium, Brave, Arc, Dia, or Edge) in a normal, non-incognito profile
 - **At least one AI runtime** *(optional — needed for AI coaching, Java help, and problem selection; reuses existing local CLI subscriptions with no API keys required)*:
   - **OpenAI (Codex):** Codex CLI (`npm install -g @openai/codex`) → `codex login`
@@ -46,14 +47,14 @@ JAVA_HOME=/path/to/jdk-25 npm run java:prepare
 
 ### 2. Install the LeetCode Browser Extension
 
-DuoLeetCode talks to LeetCode through an unpacked Manifest V3 browser extension (**DuoLeetCode Local Bridge** `v0.1.6`) so your LeetCode session cookies stay inside your browser and never touch the Node server. The unpacked extension in `spikes/leetcode/extension` is ready to load out of the box.
+DuoLeetCode talks to LeetCode through an unpacked Manifest V3 browser extension (**DuoLeetCode Local Bridge** `v0.1.7`) so your LeetCode session cookies stay inside your browser and never touch the Node server. The unpacked extension in `spikes/leetcode/extension` is ready to load out of the box.
 
 1. Open your Chromium browser and navigate to **`chrome://extensions`**.
 2. Enable **Developer mode** (toggle in the top-right corner).
 3. Click **Load unpacked** and select the **`spikes/leetcode/extension`** folder inside this repository.
-4. Confirm **DuoLeetCode Local Bridge** (`0.1.6`) appears and is enabled.
+4. Confirm **DuoLeetCode Local Bridge** (`0.1.7`) appears and is enabled.
 
-> **Updating the extension later:** After pulling changes to `spikes/leetcode/extension` (or regenerating it via `npm run leetcode:extension`), open `chrome://extensions` and click **Reload (`↻`)** on **DuoLeetCode Local Bridge**.
+> **Updating the extension later:** After pulling changes to `spikes/leetcode/extension` (or regenerating it via `npm run leetcode:extension`), open `chrome://extensions` and click **Reload (`↻`)** on **DuoLeetCode Local Bridge** (required for C++26 judging in `v0.1.7+`).
 
 ---
 
@@ -95,7 +96,7 @@ Open **[http://127.0.0.1:4318/](http://127.0.0.1:4318/)** in the **same Chromium
 
 1. **LeetCode:** Click **Sign in to LeetCode** on **Today** or **Connections**. A centered sign-in popup opens, logs you in, and closes itself automatically once connected (no LeetCode tab needs to stay open afterward). You can also try the offline local exercise anytime via **Connections → Open a demo assessment**.
 2. **Choose your AI Team in Agent settings:** Before `.local/agent-settings.json` exists, the default baseline model is `gpt-6.1-sol` (Codex). If you are using **Claude** or **Gemini / Antigravity** (or want the two-tier Astra + Sol OpenAI pairing), open **Agent settings** in the left sidebar, select **OpenAI Team (Low)**, **Claude Team (Low)**, or **Gemini Team (Low)**—or customize individual features—and click **Save agent settings**.
-3. **In-browser Java:** `javacs` warms automatically in a Web Worker (Java 25 preview profile; requires internet/CDN access for CheerpJ runtime assets) for semantic completion and compiler diagnostics, while **Run** and **Submit** execute on LeetCode's judge.
+3. **In-browser Java & local C++26:** `javacs` warms automatically in a Web Worker for Java 25 semantic completion and compiler diagnostics (requires internet/CDN access for CheerpJ runtime assets), while C++26 uses a local `clangd` process (`-std=c++26`, configured automatically with LeetCode's standard headers and helper type extraction). **Run** and **Submit** execute on LeetCode's judge in the chosen language (`java` or `cpp`).
 
 ### Optional Self-Hosting Environment Variables
 
@@ -109,6 +110,7 @@ Open **[http://127.0.0.1:4318/](http://127.0.0.1:4318/)** in the **same Chromium
 | `DUO_AGENT_MODEL` | Override default baseline model before `.local/agent-settings.json` is created | `gpt-6.1-sol` |
 | `DUO_PORT` | Override local HTTP port | `4318` |
 | `DUO_CODEX_BIN` / `DUO_CLAUDE_BIN` / `DUO_AGY_BIN` | Explicit binary paths if `codex`, `claude`, or `agy` are outside standard `PATH` | Auto-discovered on `PATH` |
+| `DUO_CLANGD_BIN` | Explicit `clangd` binary path for C++26 diagnostics, completion, and hover | Homebrew LLVM or `/usr/bin/clangd` |
 
 ## What's implemented
 

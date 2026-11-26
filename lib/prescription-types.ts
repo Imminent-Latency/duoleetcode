@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { languageIdSchema } from "./languages";
 
 export const prescriptionSchema = z.object({
   traceId: z.string().uuid().optional(),
   id: z.string().uuid(),
+  language: languageIdSchema.optional(),
   title: z.string(),
   slug: z.string().regex(/^[a-z0-9-]+$/),
   difficulty: z.string(),

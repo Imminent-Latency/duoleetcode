@@ -39,6 +39,7 @@ export const problemSchema = z.object({
   difficulty: z.string().max(30),
   content: z.string().max(200000),
   javaStarter: z.string().max(200000),
+  cppStarter: z.string().max(200000).nullable().optional(),
   exampleInputs: z.object({ raw: z.string().max(100000) }),
   metadata: z
     .object({

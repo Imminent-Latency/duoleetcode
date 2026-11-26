@@ -43,10 +43,11 @@ export class LeetCodeClient {
     if(!metadata?.systemdesign && args.length && lines.length%args.length===0){
       for(let i=0;i<lines.length;i+=args.length)cases.push({inputs:args.map((a,index)=>({name:a.name,type:a.type,raw:lines[i+index]}))});
     }
-    return {...q,metadata,javaStarter:q.codeSnippets?.find(s=>s.langSlug==='java')?.code||null,exampleInputs:{raw,cases,format:'leetcode-raw'},locked:!q.content};
+    return {...q,metadata,javaStarter:q.codeSnippets?.find(s=>s.langSlug==='java')?.code||null,cppStarter:q.codeSnippets?.find(s=>s.langSlug==='cpp')?.code||null,exampleInputs:{raw,cases,format:'leetcode-raw'},locked:!q.content};
   }
-  async execute(kind,problem,code,input){
-    const body={lang:'java',question_id:problem.questionId,typed_code:code,test_mode:false};
+  async execute(kind,problem,code,input,lang='java'){
+    if(!['java','cpp'].includes(lang))throw new Error('Unsupported language');
+    const body={lang,question_id:problem.questionId,typed_code:code,test_mode:false};
     if(kind==='run')body.data_input=input;
     else body.judge_type='large';
     return this.session.request(`/problems/${problem.titleSlug}/${kind==='run'?'interpret_solution':'submit'}/`,{method:'POST',body,authenticated:true,referer:`https://leetcode.com/problems/${problem.titleSlug}/`});

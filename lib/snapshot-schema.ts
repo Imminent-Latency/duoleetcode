@@ -11,6 +11,7 @@ import { prescriptionSchema } from "./prescription-types";
 import { reflectionDevelopmentSchema } from "./reflection-development";
 import { questionReviewSchema } from "./question-review";
 import { solvingChunkNoteSchema } from "./solving-chunks";
+import { languageIdSchema } from "./languages";
 
 const id = z.string().min(1).max(500);
 const text = z.string().max(2_000_000);
@@ -63,6 +64,7 @@ const exit = z.object({
 const attempt = z
   .object({
     id: z.string().uuid(),
+    language: languageIdSchema.optional(),
     problem: problemSchema,
     createdAt: number,
     budgetMs: number.nonnegative(),
@@ -318,7 +320,21 @@ export function validateSnapshot(raw: unknown): SnapshotData {
         reason: text.optional(),
       }),
     ),
-    runtime: z.object({ editorJava: number, executionJava: number.nullable() }),
+    runtime: z.union([
+      z
+        .object({
+          editorJava: number,
+          executionJava: number.nullable(),
+        })
+        .passthrough(),
+      z
+        .object({
+          language: languageIdSchema,
+          editorProfile: text,
+          executionProfile: text.nullable(),
+        })
+        .passthrough(),
+    ]),
   });
   const validateResearch = (value: unknown) => {
     if (Array.isArray(value)) {

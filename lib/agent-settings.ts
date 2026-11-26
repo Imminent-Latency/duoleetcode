@@ -6,8 +6,8 @@ export const agentFeatures = [
   {
     id: "reference",
     role: "java reference",
-    label: "Java help",
-    description: "Look up Java APIs and syntax during an assessment.",
+    label: "Reference help",
+    description: "Look up Java 25 or C++26 APIs and syntax during an assessment.",
   },
   {
     id: "reflection",
@@ -195,7 +195,7 @@ export function availableTeamProfiles(models: AgentModel[]): AgentTeamProfile[] 
       label: "OpenAI Team (Low)",
       provider: "Codex · ChatGPT",
       philosophy:
-        "Astra for reflection, evaluation & coaching · Sol for Java help & next-problem planning",
+        "Astra for reflection, evaluation & coaching · Sol for reference help & next-problem planning",
       deepCandidates: ["gpt-6-astra", "gpt-6.2-astra"],
       fastCandidates: ["gpt-6.1-sol", "gpt-6.2-sol"],
     },
@@ -204,7 +204,7 @@ export function availableTeamProfiles(models: AgentModel[]): AgentTeamProfile[] 
       label: "Claude Team (Low)",
       provider: "Claude SDK · ACP",
       philosophy:
-        "Opus 5.5 for reflection, evaluation & coaching · Sonnet 5.5 for Java help & next-problem planning",
+        "Opus 5.5 for reflection, evaluation & coaching · Sonnet 5.5 for reference help & next-problem planning",
       deepCandidates: ["claude-acp/opus", "claude-acp/fable", "claude-acp/claude-opus-5"],
       fastCandidates: ["claude-acp/sonnet", "claude-acp/haiku", "claude-acp/claude-sonnet-5"],
     },
@@ -213,7 +213,7 @@ export function availableTeamProfiles(models: AgentModel[]): AgentTeamProfile[] 
       label: "Gemini Team (Low)",
       provider: "Antigravity · ACP",
       philosophy:
-        "Gemini 4 Neon for reflection, evaluation & coaching · Gemini 3.8 Flash for Java help & next-problem planning",
+        "Gemini 4 Neon for reflection, evaluation & coaching · Gemini 3.8 Flash for reference help & next-problem planning",
       deepCandidates: [
         "agy-acp/gemini-4-neon",
         "agy-acp/gemini-4-carbon",

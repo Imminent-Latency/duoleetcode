@@ -1,11 +1,12 @@
 import type { AttemptStore } from "./store";
 import type { Attempt, EditorChatContext } from "./types";
 import { sameEditorContext, validateEditorContext } from "./editor-context";
+import { languageConfig } from "./languages";
 import type { ReferenceAnswer } from "./java-help";
 function active(a: Attempt, now: number) {
   if (a.phase !== "active" || a.sealed || now >= a.deadline)
     throw new Error(
-      "Java help is available while the assessment timer is running.",
+      `${languageConfig(a.language).helpLabel} is available while the assessment timer is running.`,
     );
 }
 function event(

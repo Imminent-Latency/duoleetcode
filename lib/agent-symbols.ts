@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { replay } from "./recording";
+import { cppLsp } from "./cpp-lsp";
 import type { Attempt } from "./types";
 import type { JavaSymbolEvidence } from "./research-types";
 export const symbolArgs = z.object({
@@ -135,4 +136,38 @@ export function completeSymbolJob(input: z.infer<typeof symbolReplySchema>) {
       javaProfile: 25,
       ...input.result,
     });
+}
+
+export async function requestCppSymbol(
+  a: Attempt,
+  input: unknown,
+): Promise<JavaSymbolEvidence> {
+  const snapshot = symbolSnapshot(a, input);
+  const result = await cppLsp().inspect(snapshot.source, {
+    line: snapshot.args.line - 1,
+    character: snapshot.args.column - 1,
+  });
+  const hasContent =
+    Boolean((result?.hover as any)?.contents?.length) ||
+    Boolean((result?.hover as any)?.contents?.value) ||
+    Boolean((result?.signatures as any)?.signatures?.length) ||
+    Boolean(
+      Array.isArray(result?.definition)
+        ? result.definition.length
+        : (result?.definition as any)?.uri,
+    ) ||
+    (typeof result?.hover === "string" && result.hover.trim().length > 0);
+  if (!hasContent)
+    throw new Error(
+      "clangd did not resolve this symbol. Do not claim LSP verification.",
+    );
+  return {
+    ...snapshot.args,
+    sourceHash: snapshot.sourceHash,
+    language: "cpp",
+    languageProfile: "C++26",
+    hover: result.hover ?? null,
+    signatures: result.signatures ?? null,
+    definition: result.definition ?? null,
+  };
 }

@@ -9,8 +9,19 @@ export function citationUrl(url: string) {
       u.hostname === "dev.java" ||
       u.hostname === "openjdk.org" ||
       u.hostname === "www.openjdk.org" ||
+      u.hostname === "eel.is" ||
+      u.hostname === "en.cppreference.com" ||
+      u.hostname === "isocpp.org" ||
+      u.hostname === "www.isocpp.org" ||
+      u.hostname === "open-std.org" ||
+      u.hostname === "www.open-std.org" ||
+      u.hostname === "libcxx.llvm.org" ||
+      u.hostname === "gcc.gnu.org" ||
       u.hostname === "stackoverflow.com" ||
-      (u.hostname === "github.com" && u.pathname.startsWith("/openjdk/"))
+      (u.hostname === "github.com" &&
+        (u.pathname.startsWith("/openjdk/") ||
+          u.pathname.startsWith("/llvm/llvm-project/") ||
+          u.pathname.startsWith("/gcc-mirror/gcc/")))
     )
       return u.href;
   } catch {}

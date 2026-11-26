@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import type { EditorContextDraft, EditorSelection } from "@/lib/types";
-export function useEditorChat(source: string) {
+import { languageConfig, type LanguageId } from "@/lib/languages";
+export function useEditorChat(source: string, language: LanguageId = "java") {
   const [observed, setObserved] = useState<{
     source: string;
     context: EditorContextDraft;
@@ -38,7 +39,7 @@ export function useEditorChat(source: string) {
       throw new Error(
         "Select fewer lines (up to 12,000 characters) before sending.",
       );
-    return { file: "Solution.java", cursor, selection };
+    return { file: languageConfig(language).filename, cursor, selection };
   };
   return {
     current,

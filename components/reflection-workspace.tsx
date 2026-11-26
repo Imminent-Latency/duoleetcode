@@ -51,6 +51,7 @@ import {
   reflectionReady,
   timeAtSequence,
 } from "@/lib/reflection";
+import { languageConfig } from "@/lib/languages";
 const CodeEditor = dynamic(() => import("./code-editor"), { ssr: false });
 const time = (ms: number) =>
   `${Math.floor(ms / 60000)
@@ -136,8 +137,9 @@ export default function ReflectionWorkspace({
     selectedSeq ??
     eventTimes.findLast((e) => e.elapsedMs <= playhead)?.seq ??
     0;
+  const lang = languageConfig(a.language);
   const code = useMemo(() => replay(a, seq), [a, seq]);
-  const chatEditor = useEditorChat(code);
+  const chatEditor = useEditorChat(code, lang.id);
   useEffect(() => {
     if (chatEditor.focusRequest) input.current?.focus();
   }, [chatEditor.focusRequest]);
@@ -369,7 +371,7 @@ export default function ReflectionWorkspace({
           <div className="reflection-recording">
             <div className="reflection-editor-heading">
               <Code2 size={16} />
-              <strong>Solution.java</strong>
+              <strong>{lang.filename}</strong>
               <span>Recorded solution</span>
               <Button
                 className={diff ? "toggle active" : "toggle"}
@@ -425,6 +427,7 @@ export default function ReflectionWorkspace({
             <div className="reflection-editor">
               <CodeEditor
                 value={code}
+                language={lang.id}
                 reviewTarget={{ attemptId: a.id, source: "recording", seq }}
                 selectionResetKey={playbackEpoch}
                 readOnly
@@ -642,7 +645,7 @@ export default function ReflectionWorkspace({
                   <Tabs.Tab value="takeaways">Takeaways</Tabs.Tab>
                   {!!a.javaHelp?.length && (
                     <Tabs.Tab value="java-help">
-                      Java help · {a.javaHelp.length}
+                      {lang.helpLabel} · {a.javaHelp.length}
                     </Tabs.Tab>
                   )}
                 </Tabs.List>
@@ -964,13 +967,14 @@ export default function ReflectionWorkspace({
                   <JavaHelpLog
                     attemptId={a.id}
                     entries={a.javaHelp ?? []}
+                    language={lang.id}
                     onJump={(h) =>
                       showFocus(
                         {
                           startSeq: h.requestSeq,
                           endSeq: h.responseSeq ?? h.requestSeq,
                           mode: h.responseSeq ? "range" : "snapshot",
-                          label: "Java reference lookup",
+                          label: `${lang.shortLabel} reference lookup`,
                         },
                         false,
                       )

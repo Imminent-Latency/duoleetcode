@@ -1,4 +1,5 @@
 import type { ResearchBundle } from "./research-types";
+import type { LanguageId } from "./languages";
 export type Phase = "active" | "paused" | "review" | "learn" | "complete";
 export type Exposure = "new" | "revisit" | "solved" | "unknown";
 export type Edit = { offset: number; length: number; text: string };
@@ -10,7 +11,7 @@ export type EditorSelection = {
   text: string;
 };
 export type EditorContextDraft = {
-  file: "Solution.java";
+  file: "Solution.java" | "solution.cpp";
   cursor: { line: number; column: number; lineText: string };
   selection?: EditorSelection;
 };
@@ -67,6 +68,7 @@ export type Problem = {
   difficulty: string;
   content: string;
   javaStarter: string;
+  cppStarter?: string | null;
   exampleInputs: { raw: string };
   metadata?: {
     params?: { name: string; type: string }[];
@@ -234,6 +236,7 @@ export type Attempt = {
   id: string;
   /** Separates fresh coaching evidence after an explicit coaching reset. */
   evidenceEpoch?: string;
+  language?: LanguageId;
   problem: Problem;
   createdAt: number;
   budgetMs: number;
@@ -292,4 +295,5 @@ export type AttemptSummary = Pick<
   events: number;
   gap?: string;
   demonstration?: boolean;
+  language?: LanguageId;
 };

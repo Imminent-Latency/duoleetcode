@@ -132,7 +132,7 @@ export default function AgentSettings() {
                 <Stack gap="xs" style={{ flex: 1 }}>
                   <Title order={2}>Platform preset</Title>
                   <Text c="dimmed">
-                    Applies across Java help, reflection, assessment feedback,
+                    Applies across Reference help, reflection, assessment feedback,
                     focused coaching, and planning.
                   </Text>
                   <Text size="sm" c="dimmed">

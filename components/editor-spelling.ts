@@ -1,10 +1,12 @@
 import type * as Monaco from "monaco-editor";
 import { SpellingClient } from "@/lib/spelling-client";
 import type { SpellingWord } from "@/lib/spelling";
+import { languageConfig, type LanguageId } from "@/lib/languages";
 
 export function installSpelling(
   editor: Monaco.editor.IStandaloneCodeEditor,
   monaco: typeof Monaco,
+  language: LanguageId = "java",
 ) {
   const client = new SpellingClient();
   const ignored = new Set<string>();
@@ -59,7 +61,9 @@ export function installSpelling(
       ignored.add(word.toLowerCase());
       schedule();
     }),
-    monaco.languages.registerCodeActionProvider("java", {
+    monaco.languages.registerCodeActionProvider(
+      languageConfig(language).monacoLanguage,
+      {
       async provideCodeActions(model, _range, context, token) {
         const empty = { actions: [], dispose() {} };
         if (

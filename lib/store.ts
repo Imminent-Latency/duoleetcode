@@ -10,6 +10,12 @@ import { historySeed } from "./history-seed";
 import { LearnerMemory } from "./learner-memory";
 import { applyEdits, sameEvent } from "./recording";
 import { closeLearning } from "./coaching";
+import {
+  attemptLanguage,
+  languageConfig,
+  starterForLanguage,
+  type LanguageId,
+} from "./languages";
 import type { LearningExit } from "./types";
 import type { Attempt, AttemptSummary, EvidenceEvent, Problem } from "./types";
 
@@ -160,8 +166,14 @@ export class AttemptStore {
     budgetMs: number,
     demonstration = false,
     now = Date.now(),
+    language: LanguageId = "java",
   ): Attempt {
     demonstration ||= this.isSandbox;
+    const starter = starterForLanguage(problem, language);
+    if (!starter)
+      throw new Error(
+        `This problem has no ${languageConfig(language).shortLabel} starter code.`,
+      );
     // Only explicit reflections establish prior familiarity. Merely opening or
     // attempting a problem (especially in a test session) must not establish it.
     const previous = demonstration
@@ -187,13 +199,14 @@ export class AttemptStore {
       previous?.exposure === "revisit" || previous?.exposure === "solved";
     const a: Attempt = {
       id: randomUUID(),
+      language,
       problem,
       budgetMs,
       createdAt: now,
       deadline: now + budgetMs,
       phase: "active",
-      initialSource: problem.javaStarter,
-      source: problem.javaStarter,
+      initialSource: starter,
+      source: starter,
       version: 1,
       lastSeq: 0,
       pauses: [],
@@ -416,6 +429,7 @@ export class AttemptStore {
         events: a.lastSeq,
         gap: a.evaluations.at(-1)?.gaps[0]?.skill,
         demonstration: a.demonstration,
+        language: attemptLanguage(a),
       };
     });
   }

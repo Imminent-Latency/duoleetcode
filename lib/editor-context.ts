@@ -1,10 +1,11 @@
 import { z } from "zod";
 import type { Attempt, EditorChatContext } from "./types";
 import { replay } from "./recording";
+import { languageConfig } from "./languages";
 
 const coordinate = z.number().int().positive();
 export const editorContextSchema = z.object({
-  file: z.literal("Solution.java"),
+  file: z.enum(["Solution.java", "solution.cpp"]),
   source: z.enum(["recording", "coached"]),
   seq: z.number().int().nonnegative().optional(),
   cursor: z.object({
@@ -31,6 +32,9 @@ export function validateEditorContext(
 ): EditorChatContext | undefined {
   if (input === undefined) return;
   const context = editorContextSchema.parse(input);
+  const expectedFile = languageConfig(a.language).filename;
+  if (context.file !== expectedFile)
+    throw new Error(`Editor context file must be ${expectedFile}.`);
   let source: string;
   if (context.source === "recording") {
     if (

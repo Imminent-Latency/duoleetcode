@@ -70,6 +70,16 @@ import {
   type PopupHandle,
 } from "@/lib/leetcode-bridge";
 import { java } from "@/lib/java";
+import { cpp } from "@/lib/cpp";
+import {
+  attemptLanguage,
+  availableLanguages,
+  languageConfig,
+  normalizeLanguage,
+  PREFERRED_LANGUAGE_KEY,
+  starterForLanguage,
+  type LanguageId,
+} from "@/lib/languages";
 import { useAgentSymbols } from "./use-agent-symbols";
 import { splitTestCases, testParameters } from "@/lib/test-cases";
 import { clockRemaining } from "@/lib/recording";
@@ -129,7 +139,11 @@ export default function Workspace() {
   );
   const lastAutoBridgeCheckAt = useRef(0);
   const [agentStatus, setAgentStatus] = useState<any>();
+  const [preferredLanguage, setPreferredLanguage] = useState<LanguageId>("java");
+  const [sessionLanguage, setSessionLanguage] = useState<LanguageId>("java");
   const [javaStatus, setJavaStatus] = useState("Warming Java…");
+  const [cppStatus, setCppStatus] = useState("Not loaded");
+  const [cppDetail, setCppDetail] = useState("C++26 · local clangd LSP");
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -159,7 +173,16 @@ export default function Workspace() {
     state?.serverTime,
     !!connection?.isSignedIn,
     !!agentStatus?.signedIn,
+    preferredLanguage,
   );
+  const updatePreferredLanguage = (next: LanguageId) => {
+    setPreferredLanguage(next);
+    try {
+      localStorage.setItem(PREFERRED_LANGUAGE_KEY, next);
+    } catch {}
+    if (next === "cpp") void cpp().prepare().catch(() => {});
+    else void java().prepare().catch(() => {});
+  };
   const reload = useCallback(async () => {
     const data = await api("/api/state");
     storageMode.current = data.sandboxMode ? "test" : "practice";
@@ -229,6 +252,8 @@ export default function Workspace() {
       setAttempt(recovered);
       setSource(recovered.source);
       setView("attempt");
+      if (attemptLanguage(recovered) === "cpp") void cpp().prepare().catch(() => {});
+      else void java().prepare().catch(() => {});
       localStorage.setItem(
         storageMode.current === "test"
           ? "duo-test-open-attempt"
@@ -273,11 +298,24 @@ export default function Workspace() {
       connectionRef.current = next;
       setConnection(next);
     });
+    let initialLang: LanguageId = "java";
+    try {
+      initialLang = normalizeLanguage(localStorage.getItem(PREFERRED_LANGUAGE_KEY));
+      setPreferredLanguage(initialLang);
+    } catch {}
     const engine = java();
+    const cppEngine = cpp();
     const listener = () => setJavaStatus(engine.state);
+    const cppListener = () => {
+      setCppStatus(cppEngine.state);
+      setCppDetail(cppEngine.detail);
+    };
     engine.listeners.add(listener);
+    cppEngine.listeners.add(cppListener);
     listener();
-    void engine.prepare().catch(() => {});
+    cppListener();
+    if (initialLang === "cpp") void cppEngine.prepare().catch(() => {});
+    else void engine.prepare().catch(() => {});
     const interval = setInterval(
       () => setNow(recorder.current?.now() ?? Date.now()),
       250,
@@ -285,6 +323,7 @@ export default function Workspace() {
     return () => {
       clearInterval(interval);
       engine.listeners.delete(listener);
+      cppEngine.listeners.delete(cppListener);
       stopLoginWatchRef.current?.();
       releaseLock.current?.();
     };
@@ -399,8 +438,12 @@ export default function Workspace() {
       try {
         if (action === "resume") {
           await r.flush();
-          await java().prepare();
-          // Warming Java must never resume an assessment in a background window.
+          if (attemptLanguage(r.attempt) === "cpp") {
+            await cpp().prepare().catch(() => {});
+          } else {
+            await java().prepare();
+          }
+          // Warming the language engine must never resume an assessment in a background window.
           if (document.hidden || !document.hasFocus()) return;
         }
         r.record({
@@ -736,9 +779,17 @@ export default function Workspace() {
           : await bridge("problem", { slug });
       if (p.locked)
         throw new Error("This problem is locked for the connected account.");
-      if (!p.javaStarter)
-        throw new Error("This problem has no Java starter code.");
-      setSelected(p);
+      const langs = availableLanguages(p);
+      if (!langs.length)
+        throw new Error("This problem has no Java or C++ starter code.");
+      const normalized: Problem = { ...p, javaStarter: p.javaStarter ?? "" };
+      const chosen = langs.includes(preferredLanguage)
+        ? preferredLanguage
+        : langs[0];
+      setSessionLanguage(chosen);
+      if (chosen === "cpp") void cpp().prepare().catch(() => {});
+      else void java().prepare().catch(() => {});
+      setSelected(normalized);
     } catch (e) {
       showError(e);
     } finally {
@@ -749,11 +800,16 @@ export default function Workspace() {
     if (!selected) return;
     setBusy("Starting assessment");
     try {
-      await java().prepare();
+      if (sessionLanguage === "cpp") {
+        await cpp().prepare().catch(() => {});
+      } else {
+        await java().prepare();
+      }
       const { attempt: a, serverTime } = await api("/api/state", {
         problem: selected,
         budgetMs: minutes * 60000,
         demonstration: selected.questionId === "demo" || testSession,
+        language: sessionLanguage,
       });
       await acquire(a.id);
       const r = new Recorder(a, serverTime, setSaveStatus);
@@ -797,6 +853,17 @@ export default function Workspace() {
     );
   const judge = async (kind: "run" | "submit", input: string) => {
     if (!attempt || !recorder.current || judgeBusy) return;
+    const lang = attemptLanguage(attempt);
+    if (
+      lang === "cpp" &&
+      connection.version &&
+      connection.version.localeCompare("0.1.7", undefined, { numeric: true }) < 0
+    ) {
+      setError(
+        "Reload DuoLeetCode Local Bridge (v0.1.7+) in chrome://extensions before running or submitting C++ code.",
+      );
+      return;
+    }
     setJudgeBusy(true);
     setError("");
     let local: JudgeJob | undefined;
@@ -821,6 +888,7 @@ export default function Workspace() {
         code: source,
         input: kind === "run" ? input : undefined,
         idempotencyKey: id,
+        lang: languageConfig(lang).leetcodeSlug,
       });
       await api("/api/attempts/" + attempt.id, {
         action: "job",
@@ -844,7 +912,12 @@ export default function Workspace() {
       setJudgeBusy(false);
     }
   };
-  useAgentSymbols(attempt?.id, Boolean(busy && attempt?.sealed));
+  useAgentSymbols(
+    attempt?.id,
+    Boolean(
+      busy && attempt?.sealed && attemptLanguage(attempt) === "java",
+    ),
+  );
   const runAgent = async (
     action: "evaluate" | "coach" | "reflect" | "prepare",
     message?: CoachRequest,
@@ -907,6 +980,16 @@ export default function Workspace() {
       (a: AttemptSummary) => a.endedAt !== undefined && !a.demonstration,
     ) ?? [];
   const live = attempt && ["active", "paused"].includes(attempt.phase);
+  const topbarLanguage =
+    attempt && view === "attempt"
+      ? attemptLanguage(attempt)
+      : preferredLanguage;
+  const topbarEngineStatus =
+    topbarLanguage === "cpp" ? cppStatus : javaStatus;
+  const topbarEngineReady =
+    topbarLanguage === "cpp"
+      ? cppStatus === "C++26 ready"
+      : javaStatus === "Java ready";
   return (
     <div
       className={
@@ -1051,10 +1134,10 @@ export default function Workspace() {
           <div className="top-status">
             <span
               className={
-                javaStatus === "Java ready" ? "status-dot" : "status-dot amber"
+                topbarEngineReady ? "status-dot" : "status-dot amber"
               }
             />
-            {javaStatus}
+            {topbarEngineStatus}
             <span className="separator" />
             <span className="local-tag">
               {state?.sandboxMode ? "TEST MODE" : "LOCAL PRACTICE"}
@@ -1118,23 +1201,45 @@ export default function Workspace() {
                   A focused challenge, a useful insight, and a clear next step.
                 </p>
               </div>
-              <div className="date-chip">
-                <span>
-                  {new Date(now).toLocaleDateString(undefined, {
-                    weekday: "long",
-                  })}
-                </span>
-                <strong>
-                  {new Date(now).toLocaleDateString(undefined, {
-                    month: "long",
-                    day: "numeric",
-                  })}
-                </strong>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  gap: 10,
+                }}
+              >
+                <div className="date-chip">
+                  <span>
+                    {new Date(now).toLocaleDateString(undefined, {
+                      weekday: "long",
+                    })}
+                  </span>
+                  <strong>
+                    {new Date(now).toLocaleDateString(undefined, {
+                      month: "long",
+                      day: "numeric",
+                    })}
+                  </strong>
+                </div>
+                <SegmentedControl
+                  aria-label="Practice language"
+                  size="xs"
+                  value={preferredLanguage}
+                  onChange={(value) =>
+                    updatePreferredLanguage(value as LanguageId)
+                  }
+                  data={[
+                    { value: "java", label: "Java 25" },
+                    { value: "cpp", label: "C++26" },
+                  ]}
+                />
               </div>
             </div>
             <div className="home-grid">
               <ProblemPrescription
                 controller={prescription}
+                language={preferredLanguage}
                 continuation={state?.recommendation}
                 ready={
                   !!connection?.isSignedIn &&
@@ -1291,6 +1396,8 @@ export default function Workspace() {
         )}
         {view === "catalog" && (
           <Catalog
+            language={preferredLanguage}
+            onLanguageChange={updatePreferredLanguage}
             onChoose={choose}
             disabled={!!busy}
             connection={connection}
@@ -1331,8 +1438,8 @@ export default function Workspace() {
                 </span>
                 <h2>LeetCode</h2>
                 <p>
-                  Problem descriptions, Java starter code, example tests, Run
-                  and Submit — through your regular browser.
+                  Problem descriptions, Java and C++ starter code, example
+                  tests, Run and Submit — through your regular browser.
                 </p>
                 <ConnectionLine
                   ok={connection.isSignedIn}
@@ -1493,6 +1600,40 @@ export default function Workspace() {
               </Panel>
               <Panel className="panel connection-card">
                 <span className="large-icon">
+                  <Code2 />
+                </span>
+                <h2>C++26 local toolchain</h2>
+                <p>
+                  Semantic completion, hover signatures, and diagnostics from
+                  your local clangd process using -std=c++26.
+                </p>
+                <ConnectionLine
+                  ok={cppStatus === "C++26 ready"}
+                  tone={
+                    cppStatus === "C++26 ready"
+                      ? "ok"
+                      : cppStatus === "C++26 unavailable"
+                        ? "warn"
+                        : "pending"
+                  }
+                  label={cppStatus}
+                  detail={cppDetail}
+                />
+                <Button
+                  className="button secondary"
+                  onClick={() => {
+                    void cpp().prepare().catch(showError);
+                  }}
+                >
+                  Warm up C++26 <RotateCcw size={15} />
+                </Button>
+                <p className="small">
+                  Requires clangd on this machine (or DUO_CLANGD_BIN). Run and
+                  Submit use LeetCode’s judge.
+                </p>
+              </Panel>
+              <Panel className="panel connection-card">
+                <span className="large-icon">
                   <FlaskConical />
                 </span>
                 <h2>Try the whole flow</h2>
@@ -1596,6 +1737,31 @@ export default function Workspace() {
             {selected.title}{" "}
             <span className="difficulty">{selected.difficulty}</span>
           </p>
+          <label className="field-label" htmlFor="session-language">
+            Language
+          </label>
+          <SegmentedControl
+            id="session-language"
+            aria-label="Session language"
+            value={sessionLanguage}
+            onChange={(value) => {
+              const lang = value as LanguageId;
+              setSessionLanguage(lang);
+              updatePreferredLanguage(lang);
+            }}
+            data={[
+              {
+                value: "java",
+                label: "Java 25",
+                disabled: !starterForLanguage(selected, "java"),
+              },
+              {
+                value: "cpp",
+                label: "C++26",
+                disabled: !starterForLanguage(selected, "cpp"),
+              },
+            ]}
+          />
           <label className="field-label" htmlFor="time-budget">
             Your timebox
           </label>
@@ -1634,21 +1800,32 @@ export default function Workspace() {
           )}
           <div className="preflight">
             <p>
-              <Check size={16} /> Problem and starter code prepared
+              <Check size={16} /> Problem and{" "}
+              {languageConfig(sessionLanguage).shortLabel} starter code prepared
             </p>
             <p>
-              {javaStatus === "Java ready" ? (
+              {(
+                sessionLanguage === "cpp"
+                  ? cppStatus === "C++26 ready"
+                  : javaStatus === "Java ready"
+              ) ? (
                 <Check size={16} />
               ) : (
                 <LoaderCircle className="spin" size={16} />
               )}{" "}
-              {javaStatus}
+              {sessionLanguage === "cpp" ? cppStatus : javaStatus}
             </p>
             <p>
               <ShieldCheck size={16} /> Your independent attempt stays separate
               from coaching
             </p>
           </div>
+          {sessionLanguage === "cpp" && cppStatus === "C++26 unavailable" && (
+            <p className="small">
+              Local clangd checks are unavailable; syntax highlighting and
+              LeetCode judging still work.
+            </p>
+          )}
           <p className="small">
             The problem opens when the timer starts. Switching tabs keeps the
             timer running. Leaving this window pauses the assessment; resume
@@ -1658,7 +1835,9 @@ export default function Workspace() {
             className="button primary full"
             disabled={
               !!busy ||
-              javaStatus !== "Java ready" ||
+              (sessionLanguage === "java"
+                ? javaStatus !== "Java ready"
+                : cppStatus === "Warming C++26…") ||
               minutes < 1 ||
               minutes > 90
             }
@@ -1706,12 +1885,16 @@ function ConnectionLine({
 }
 
 function Catalog({
+  language,
+  onLanguageChange,
   onChoose,
   disabled,
   connection,
   onBridgeAction,
   onRecheck,
 }: {
+  language: LanguageId;
+  onLanguageChange: (language: LanguageId) => void;
   onChoose: (slug: string) => void;
   disabled: boolean;
   connection: BridgeConnection;
@@ -1760,7 +1943,16 @@ function Catalog({
             timebox.
           </p>
         </div>
-        <span className="pill">JAVA</span>
+        <SegmentedControl
+          aria-label="Catalog language"
+          size="xs"
+          value={language}
+          onChange={(value) => onLanguageChange(value as LanguageId)}
+          data={[
+            { value: "java", label: "Java 25" },
+            { value: "cpp", label: "C++26" },
+          ]}
+        />
       </div>
       <div className="library-tools">
         <TextInput
@@ -1927,6 +2119,7 @@ function Assessment({
   onAssistance: (detail: string) => Promise<void>;
   onRecordHelp: RecordHelp;
 }) {
+  const lang = languageConfig(attempt.language);
   const workbenchId = useId();
   const [input, setInput] = useState(attempt.problem.exampleInputs.raw);
   const [selectedTestCase, setSelectedTestCase] = useState(0);
@@ -1935,10 +2128,12 @@ function Assessment({
   const [assistance, setAssistance] = useState("");
   const [showAssistance, setShowAssistance] = useState(false);
   const [referenceOpen, setReferenceOpen] = useState(false);
-  const chatEditor = useEditorChat(source);
+  const chatEditor = useEditorChat(source, lang.id);
   const [problemHidden, setProblemHidden] = useState(false);
   const [testsHidden, setTestsHidden] = useState(false);
-  const [diagnosticStatus, setDiagnosticStatus] = useState("Checking Java…");
+  const [diagnosticStatus, setDiagnosticStatus] = useState(
+    `Checking ${lang.shortLabel}…`,
+  );
   const [diagnosticErrors, setDiagnosticErrors] = useState(0);
   const [diagnosticDetail, setDiagnosticDetail] = useState("");
   const [diagnosticsRetry, setDiagnosticsRetry] = useState(0);
@@ -2006,12 +2201,14 @@ function Assessment({
                   chatEditor.requestHelp(chatEditor.current);
                 setReferenceOpen(!referenceOpen);
               }}
-              title="Java help · ⌘⇧H / Ctrl+Shift+H in the editor"
+              title={`${lang.helpLabel} · ⌘⇧H / Ctrl+Shift+H in the editor`}
               aria-pressed={referenceOpen}
-              aria-label={referenceOpen ? "Hide Java help" : "Show Java help"}
+              aria-label={
+                referenceOpen ? `Hide ${lang.helpLabel}` : `Show ${lang.helpLabel}`
+              }
             >
               <MessageCircle size={16} />
-              <span>Java help</span>
+              <span>{lang.helpLabel}</span>
             </Button>
           </div>
           <div
@@ -2081,7 +2278,7 @@ function Assessment({
           </div>
         </header>
         <SplitPane
-          label="Resize workspace and Java help"
+          label={`Resize workspace and ${lang.helpLabel}`}
           storageKey="duo-java-help-width"
           initial={73}
           secondHidden={!referenceOpen}
@@ -2107,9 +2304,9 @@ function Assessment({
                 <Panel className="coding-pane">
                   <div className="pane-title">
                     <span className="file-tab">
-                      <Code2 size={16} /> Solution.java
+                      <Code2 size={16} /> {lang.filename}
                     </span>
-                    <span>JAVA 25</span>
+                    <span>{lang.badge}</span>
                   </div>
                   <SplitPane
                     label="Resize editor and tests"
@@ -2122,6 +2319,7 @@ function Assessment({
                         <div className="editor-area">
                           <CodeEditor
                             value={source}
+                            language={lang.id}
                             reviewTarget={{
                               attemptId: attempt.id,
                               source: "recording",
@@ -2154,14 +2352,15 @@ function Assessment({
                             <span title={diagnosticDetail || undefined}>
                               {diagnosticStatus}
                             </span>
-                            {diagnosticStatus === "Java checks unavailable" && (
+                            {(diagnosticStatus === "Java checks unavailable" ||
+                              diagnosticStatus === "C++26 checks unavailable") && (
                               <Button
                                 className="button ghost compact"
                                 onClick={() =>
                                   setDiagnosticsRetry((value) => value + 1)
                                 }
                               >
-                                Retry Java checks
+                                Retry {lang.shortLabel} checks
                               </Button>
                             )}
                           </span>
@@ -2257,7 +2456,7 @@ function Assessment({
                         id="assistance"
                         value={assistance}
                         onChange={(e) => setAssistance(e.target.value)}
-                        placeholder="e.g. Looked up HashMap.put syntax"
+                        placeholder={lang.outsideHelpExample}
                       />
                       <Button
                         className="button secondary"
@@ -2282,6 +2481,7 @@ function Assessment({
             <JavaHelpChat
               attemptId={attempt.id}
               initial={attempt.javaHelp ?? []}
+              language={lang.id}
               open={referenceOpen}
               disabled={paused || busy || remaining <= 0}
               onRecord={onRecordHelp}
@@ -2358,9 +2558,10 @@ function Review({
   const [showLearning, setShowLearning] = useState(
     a.phase === "learn" || (a.phase === "complete" && !!a.followup),
   );
+  const reviewLang = attemptLanguage(a);
   const [coached, setCoached] = useState(a.followup?.coachedCode ?? a.source);
   const [coachedDirty, setCoachedDirty] = useState(false);
-  const coachedChat = useEditorChat(coached);
+  const coachedChat = useEditorChat(coached, reviewLang);
   const evaluation =
     a.evaluations[a.followup?.evaluationRevision ?? a.evaluations.length - 1];
   const safe = (fn: () => Promise<void>) => void fn().catch(onError);
@@ -2427,6 +2628,7 @@ function Review({
             <div className="coached-editor">
               <CodeEditor
                 value={coached}
+                language={reviewLang}
                 reviewTarget={{ attemptId: a.id, source: "coached" }}
                 onContextChange={coachedChat.onChange}
                 onAskHelp={coachedChat.requestHelp}

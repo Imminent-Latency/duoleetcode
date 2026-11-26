@@ -1,31 +1,58 @@
 import type { Problem, JudgeJob } from "./types";
 export type Parameter = { name: string; type: string };
+function splitTopLevelParams(paramsText: string): string[] {
+  const parts: string[] = [];
+  let depth = 0,
+    start = 0;
+  for (let i = 0; i < paramsText.length; i++) {
+    const c = paramsText[i];
+    if (c === "<" || c === "(" || c === "[") depth++;
+    if (c === ">" || c === ")" || c === "]") depth = Math.max(0, depth - 1);
+    if (c === "," && depth === 0) {
+      parts.push(paramsText.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(paramsText.slice(start));
+  return parts;
+}
+
 export function testParameters(problem: Problem): Parameter[] {
   if (problem.metadata?.systemdesign) return [];
   if (problem.metadata?.params?.length) return problem.metadata.params;
   // Legacy saved attempts lack metadata. Only fall back to a simple public
   // method signature; unsupported designs keep the raw-input editor.
-  const signature =
-    /public\s+(?:static\s+)?[\w<>?,.\[\] ]+\s+\w+\s*\(([^)]*)\)/.exec(
-      problem.javaStarter,
+  const javaSig = problem.javaStarter?.trim()
+    ? /public\s+(?:static\s+)?[\w<>?,.\[\] ]+\s+\w+\s*\(([^)]*)\)/.exec(
+        problem.javaStarter,
+      )
+    : null;
+  if (javaSig?.[1]?.trim()) {
+    const params = splitTopLevelParams(javaSig[1]).map((p) =>
+      /^\s*(.+?)\s+([\w$]+)\s*$/.exec(p),
     );
-  if (!signature?.[1].trim()) return [];
-  const parts: string[] = [];
-  let depth = 0,
-    start = 0;
-  for (let i = 0; i < signature[1].length; i++) {
-    const c = signature[1][i];
-    if (c === "<") depth++;
-    if (c === ">") depth--;
-    if (c === "," && depth === 0) {
-      parts.push(signature[1].slice(start, i));
-      start = i + 1;
-    }
+    return params.every(Boolean)
+      ? params.map((p) => ({ type: p![1].trim(), name: p![2] }))
+      : [];
   }
-  parts.push(signature[1].slice(start));
-  const params = parts.map((p) => /^\s*(.+?)\s+([\w$]+)\s*$/.exec(p));
-  return params.every(Boolean)
-    ? params.map((p) => ({ type: p![1].trim(), name: p![2] }))
+  const cppSource = problem.cppStarter
+    ?.replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+  if (!cppSource?.trim()) return [];
+  const cppClass = /class\s+Solution\b[\s\S]*?public\s*:([\s\S]*)/.exec(
+    cppSource,
+  );
+  const cppBody = cppClass?.[1] ?? cppSource;
+  const cppSig =
+    /(?:^|\n)\s*(?:virtual\s+|static\s+|inline\s+|constexpr\s+)*[\w:<> *&]+\s+[\w~]+\s*\(([^)]*)\)/.exec(
+      cppBody,
+    );
+  if (!cppSig?.[1]?.trim()) return [];
+  const cppParams = splitTopLevelParams(cppSig[1]).map((p) =>
+    /^\s*(.+?[*&\s])\s*([A-Za-z_]\w*)\s*(?:=\s*[^,]+)?$/.exec(p),
+  );
+  return cppParams.every(Boolean)
+    ? cppParams.map((p) => ({ type: p![1].trim(), name: p![2] }))
     : [];
 }
 export function splitTestCases(

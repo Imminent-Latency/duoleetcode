@@ -6,6 +6,7 @@ import { askJavaHelp, deliverJavaHelp } from "@/lib/java-help-service";
 import { publicJavaHelp } from "@/lib/java-help";
 import { failure, json, localRequest } from "@/lib/http";
 import { editorContextSchema } from "@/lib/editor-context";
+import { attemptLanguage } from "@/lib/languages";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 const shared = globalThis as typeof globalThis & {
@@ -60,6 +61,8 @@ export async function POST(req: Request) {
         },
         async (trace) => {
           trace.event("workflow.input", body);
+          const attempt = store(body.attemptId).get(body.attemptId);
+          const lang = attemptLanguage(attempt);
           await askJavaHelp(
             store(body.attemptId),
             body.attemptId,
@@ -69,7 +72,8 @@ export async function POST(req: Request) {
               question: body.question!,
               editor: body.editor,
             },
-            answerJavaReference,
+            (question, history, editor) =>
+              answerJavaReference(question, history, editor, undefined, lang),
           );
           trace.event("workflow.saved", {
             attemptId: body.attemptId,

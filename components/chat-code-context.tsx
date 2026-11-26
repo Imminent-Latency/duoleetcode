@@ -15,7 +15,7 @@ export function SavedCodeContext({ context }: { context?: EditorChatContext }) {
   return (
     <details className="chat-code-context saved">
       <summary>
-        Solution.java · L{context.cursor.line}:C{context.cursor.column}
+        {context.file} · L{context.cursor.line}:C{context.cursor.column}
         {context.selection
           ? ` · ${lines(context.selection)}`
           : " · Cursor line"}

@@ -201,3 +201,37 @@ test('extension-managed auth popup opens only fixed LeetCode URLs and auto-close
   assert.deepEqual(await bridge.onSessionCookieDetected(),{closed:false});
   assert.deepEqual(removed,[71]);
 });
+
+test('supports cppStarter extraction, execution lang=cpp, and rejects missing cppStarter or invalid lang',async()=>{
+  const requests=[];
+  const session={
+    request:async(url,options)=>{
+      requests.push({url,options});
+      if(url==='/graphql/')return {data:{question:{questionId:'1',questionFrontendId:'1',title:'Two Sum',titleSlug:'two-sum',difficulty:'Easy',isPaidOnly:false,content:'<p>Two Sum</p>',sampleTestCase:'[2,7]\n9',exampleTestcases:'[2,7]\n9',codeSnippets:[{lang:'Java',langSlug:'java',code:'class Solution {}'},{lang:'C++',langSlug:'cpp',code:'class Solution { public: int f(); };'}],metaData:'{"params":[{"name":"nums","type":"integer[]"}]}',topicTags:[]}}};
+      return {submission_id:456};
+    }
+  };
+  const client=new LeetCodeClient(session);
+  const prob=await client.problem('two-sum');
+  assert.equal(prob.javaStarter,'class Solution {}');
+  assert.equal(prob.cppStarter,'class Solution { public: int f(); };');
+  await client.execute('submit',prob,'class Solution { public: int f() { return 0; } };',undefined,'cpp');
+  assert.equal(requests.at(-1).options.body.lang,'cpp');
+  await client.execute('submit',prob,'class Solution {}');
+  assert.equal(requests.at(-1).options.body.lang,'java');
+  await assert.rejects(client.execute('submit',prob,'print(1)',undefined,'python3'),/Unsupported language/);
+
+  const executed=[];
+  const s=setup({
+    problem:async()=>({questionId:'1',title:'Two Sum',javaStarter:'class Solution {}',cppStarter:'class Solution { public: int f(); };',exampleInputs:{raw:'[2,7]\n9'},locked:false}),
+    execute:async(kind,problem,code,input,lang)=>{executed.push({kind,code,lang});return {submission_id:789,interpret_id:'run-789'};}
+  });
+  const cppJob=await s.dispatch('start',{...args,lang:'cpp',idempotencyKey:'test-cpp-0000000000001'});
+  assert.equal(cppJob.lang,'cpp');
+  assert.equal(cppJob.state,'judging');
+  assert.deepEqual(executed,[{kind:'submit',code:args.code,lang:'cpp'}]);
+  await assert.rejects(s.dispatch('start',{...args,lang:'python3',idempotencyKey:'test-py-00000000000001'}),/Unsupported language/);
+
+  const noCpp=setup({problem:async()=>({questionId:'1',title:'Two Sum',javaStarter:'class Solution {}',cppStarter:null,exampleInputs:{raw:'[2,7]\n9'},locked:false})});
+  await assert.rejects(noCpp.dispatch('start',{...args,lang:'cpp',idempotencyKey:'test-nocpp-00000000001'}),/C\+\+ starter/);
+});

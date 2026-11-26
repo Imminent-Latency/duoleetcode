@@ -1,13 +1,13 @@
 export type SpellingWord = { word: string; offset: number; length: number };
 
-// Only prose in Java comments: strings, text blocks and identifiers are code.
+// Only prose in code comments: strings, text blocks and identifiers are code.
 // Keep UTF-16 offsets unchanged so Monaco edits exactly the misspelled word.
 export function commentWords(source: string): SpellingWord[] {
   const comments: { text: string; offset: number }[] = [];
   const blank = (text: string) => text.replace(/[^\r\n]/g, " ");
   const code = source.replace(
-    /"""[\s\S]*?(?:"""|$)|"(?:\\[\s\S]|[^"\\\r\n])*(?:"|(?=\r|\n|$))|'(?:\\[\s\S]|[^'\\\r\n])*(?:'|(?=\r|\n|$))|\/\/[^\r\n]*|\/\*[\s\S]*?(?:\*\/|$)/g,
-    (text: string, offset: number) => {
+    /"""[\s\S]*?(?:"""|$)|R"([^()\s\\]{0,16})\([\s\S]*?\)\1"|"(?:\\[\s\S]|[^"\\\r\n])*(?:"|(?=\r|\n|$))|'(?:\\[\s\S]|[^'\\\r\n])*(?:'|(?=\r|\n|$))|\/\/[^\r\n]*|\/\*[\s\S]*?(?:\*\/|$)/g,
+    (text: string, _delim: string, offset: number) => {
       if (text.startsWith("//") || text.startsWith("/*"))
         comments.push({ text, offset });
       return blank(text);
@@ -44,6 +44,6 @@ export function commentWords(source: string): SpellingWord[] {
 }
 
 export const codingVocabulary =
-  "leetcode hackerrank javacs int ints boolean hashmap hashmaps hashset hashsets arraylist runtime runtimes comparator comparators iterable iterables memoization memoize deque deques subarray subarrays substring substrings subtree subtrees nums nullptr javadoc bigo".split(
+  "leetcode hackerrank javacs clangd libcxx libstdc int ints boolean hashmap hashmaps hashset hashsets arraylist runtime runtimes comparator comparators iterable iterables memoization memoize deque deques subarray subarrays substring substrings subtree subtrees nums nullptr javadoc bigo constexpr consteval constinit noexcept decltype typename std emplace unordered multiset multimap bitset stringview mdspan flatmap flatset println ranges views struct typedef iter vec vecs str strs umap uset pq int64 uint64".split(
     " ",
   );

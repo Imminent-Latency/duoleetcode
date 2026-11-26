@@ -6,6 +6,7 @@ import { resolveBackgroundSettings } from "./agent-settings";
 import { pauseAt, solvingTime } from "./assessment-time";
 import { replay } from "./recording";
 import { reviewTopics } from "./question-review";
+import { languageConfig, type LanguageId } from "./languages";
 import type { ResearchBundle } from "./research-types";
 
 export const chunkCaptureSignals = [
@@ -93,7 +94,11 @@ function normalizedCodeLines(javaSource: string): string[] {
     .replace(/\/\/.*$/gm, "")
     .split(/\r?\n/)
     .map((line) => line.replace(/\s+/g, ""))
-    .filter((line) => line.length >= 10 && !/^import/.test(line));
+    .filter(
+      (line) =>
+        line.length >= 10 &&
+        !/^(?:import|#include|usingnamespace)/.test(line),
+    );
 }
 
 function codeChangeCount(a: string, b: string) {
@@ -315,12 +320,20 @@ export function detectSolvingMilestone(
   return null;
 }
 
-export const solvingChunkPolicy = `You record a private, strictly observational background note for one stretch of an active coding session so post-assessment reflection starts faster and preserves meaningful solving history.
+export function solvingChunkPolicyFor(language: LanguageId = "java") {
+  const cfg = languageConfig(language);
+  const docsNote =
+    language === "cpp"
+      ? "Verify substantive C++26 API/library behavior with official C++26 documentation tools and cite actual retrieved URLs in sourceUrls and Markdown links."
+      : "Verify substantive Java API/library behavior with official Java 25 documentation tools and cite actual retrieved URLs in sourceUrls and Markdown links.";
+  return `You record a private, strictly observational background note for one stretch of an active coding session so post-assessment reflection starts faster and preserves meaningful solving history.
 Respect captureContext strictly: state ONLY what was observed in the code, edits, and execution results—NEVER assume or state why the user deleted, rewrote, ran, submitted, or paused.
 Noise versus teachable detours:
 - DISCARD transient construction noise: when signal is quiet-interval or pause-boundary (or mid-edit scaffolding), completely ignore dangling conditionals, missing return statements, unused variables, temporary placeholders, and quick typo fixes.
 - PRESERVE meaningful solving detours and facts: record concrete representation properties (representation-fact, such as a map overwriting duplicate keys), test/judge results (execution-outcome), and substantive detours (potential-detour, such as logic built around a missed constraint or edge case), even if the user later modifies or fixes that code. Frame potential-detour items neutrally as observable properties and open questions, never as confirmed misconceptions or final-solution defects.
-Verify substantive Java API/library behavior with official Java 25 documentation tools and cite actual retrieved URLs in sourceUrls and Markdown links. Keep summary to 1–3 sentences, observations to at most 4 concise items, and candidateQuestions to at most 3 neutral questions without assumed motives.`;
+${docsNote} Keep summary to 1–3 sentences, observations to at most 4 concise items, and candidateQuestions to at most 3 neutral questions without assumed motives. (${cfg.profileLabel})`;
+}
+export const solvingChunkPolicy = solvingChunkPolicyFor("java");
 
 export function validateSolvingChunkOutput(
   a: Attempt,

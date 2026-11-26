@@ -14,6 +14,7 @@ import { Button, Panel } from "./ui";
 import ReviewFlagButton from "./review-flag";
 import CoachText from "./coach-text";
 import { api, bridge } from "@/lib/browser";
+import { languageConfig, type LanguageId } from "@/lib/languages";
 import type { BridgeConnection } from "@/lib/leetcode-bridge";
 import type { PrescriptionStatus } from "@/lib/prescription-types";
 
@@ -22,31 +23,37 @@ export function useProblemPrescription(
   revision: number | undefined,
   connected: boolean,
   signedIn: boolean,
+  language: LanguageId = "java",
 ) {
   const [status, setStatus] = useState<PrescriptionStatus>({});
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
   const automatic = useRef<string | undefined>(undefined);
   const handled = useRef(new Set<string>());
-  const start = useCallback(async (another = false) => {
-    setError("");
-    setStarting(true);
-    try {
-      setStatus(await api("/api/prescription", { action: "start", another }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setStarting(false);
-    }
-  }, []);
+  const start = useCallback(
+    async (another = false) => {
+      setError("");
+      setStarting(true);
+      try {
+        setStatus(
+          await api("/api/prescription", { action: "start", another, language }),
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setStarting(false);
+      }
+    },
+    [language],
+  );
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    void api("/api/prescription")
+    void api(`/api/prescription?language=${language}`)
       .then((data: PrescriptionStatus) => {
         if (!live) return;
         setStatus(data);
-        const key = String(revision);
+        const key = `${revision}:${language}`;
         if (
           !data.prescription &&
           data.job?.state !== "running" &&
@@ -64,7 +71,7 @@ export function useProblemPrescription(
     return () => {
       live = false;
     };
-  }, [enabled, revision, connected, signedIn, start]);
+  }, [enabled, revision, connected, signedIn, language, start]);
 
   // Runs at workspace level, so browsing other app views doesn't interrupt catalog tools.
   useEffect(() => {
@@ -73,7 +80,9 @@ export function useProblemPrescription(
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const data: PrescriptionStatus = await api("/api/prescription");
+        const data: PrescriptionStatus = await api(
+          `/api/prescription?language=${language}`,
+        );
         if (!live) return;
         setStatus(data);
         for (const request of data.job?.requests ?? []) {
@@ -119,7 +128,7 @@ export function useProblemPrescription(
       live = false;
       clearTimeout(timer);
     };
-  }, [status.job?.id, status.job?.state]);
+  }, [status.job?.id, status.job?.state, language]);
   return {
     status,
     error: error || status.job?.error || "",
@@ -130,6 +139,7 @@ export function useProblemPrescription(
 
 export default function ProblemPrescription({
   controller,
+  language = "java",
   continuation,
   ready,
   bridgeConnection,
@@ -142,6 +152,7 @@ export default function ProblemPrescription({
   onBridgeAction,
 }: {
   controller: ReturnType<typeof useProblemPrescription>;
+  language?: LanguageId;
   continuation?: { title: string; reason: string; basedOn: string } | null;
   ready: boolean;
   bridgeConnection?: BridgeConnection;
@@ -155,6 +166,7 @@ export default function ProblemPrescription({
 }) {
   const { status, error, busy, start } = controller;
   const p = status.prescription;
+  const cfg = languageConfig(p?.language ?? language);
   const loading = busy && !continuation;
   const needsLeetCodeLogin =
     !ready &&
@@ -180,7 +192,7 @@ export default function ProblemPrescription({
           (loading
             ? "Matching your practice evidence with a manageable problem from LeetCode."
             : (p?.reason ??
-              "Your practice history helps choose one useful, timed Java challenge."))}
+              `Your practice history helps choose one useful, timed ${cfg.shortLabel} challenge.`))}
       </p>
       {loading ? (
         <p className="prescription-status" role="status">
@@ -193,7 +205,7 @@ export default function ProblemPrescription({
           <>
             <div className="activity-meta">
               <span>
-                <Code2 size={15} /> Java · {p.difficulty}
+                <Code2 size={15} /> {cfg.shortLabel} · {p.difficulty}
               </span>
               <span>
                 <Timer size={15} /> {p.minutes} min suggested
@@ -235,7 +247,7 @@ export default function ProblemPrescription({
                 <p>A starting assessment to collect your first evidence.</p>
               )}
               <p className="small">
-                {p.model} · {p.effort} effort · Java and access checked on
+                {p.model} · {p.effort} effort · {cfg.shortLabel} and access checked on
                 LeetCode
               </p>
             </details>

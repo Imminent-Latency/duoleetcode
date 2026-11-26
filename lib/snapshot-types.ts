@@ -104,6 +104,7 @@ export const browserPreferenceKeys = [
   "duo-editor-height-page",
   "duo-reflection-split",
   "duo-reflection-follow",
+  "duo-preferred-language",
 ];
 export const isBrowserDataKey = (key: string) =>
   browserPreferenceKeys.includes(key) ||

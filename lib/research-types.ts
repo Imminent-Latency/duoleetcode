@@ -1,3 +1,5 @@
+import type { LanguageId } from "./languages";
+
 export type ResearchSource = {
   id: string;
   title: string;
@@ -20,11 +22,27 @@ export type JavaSymbolEvidence = {
   line: number;
   column: number;
   sourceHash: string;
-  javaProfile: number;
+  javaProfile?: number;
+  language?: LanguageId;
+  languageProfile?: string;
   hover: unknown;
   signatures: unknown;
   definition: unknown;
 };
+export type SymbolEvidence = JavaSymbolEvidence;
+export type ResearchRuntime =
+  | {
+      editorJava: number;
+      executionJava: number | null;
+      language?: "java";
+      editorProfile?: string;
+      executionProfile?: string | null;
+    }
+  | {
+      language: "cpp";
+      editorProfile: string;
+      executionProfile: string | null;
+    };
 export type ResearchBundle = {
   traceId?: string;
   audit?: { passes: number; revised: boolean };
@@ -32,5 +50,5 @@ export type ResearchBundle = {
   claims: TechnicalClaim[];
   symbols: JavaSymbolEvidence[];
   lookups: { tool: string; target: string; ok: boolean; reason?: string }[];
-  runtime: { editorJava: number; executionJava: number | null };
+  runtime: ResearchRuntime;
 };

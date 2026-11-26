@@ -7,10 +7,15 @@ import {
   answerCatalogRequest,
 } from "@/lib/prescription";
 import { sandboxMode } from "@/lib/practice-storage.mjs";
+import { languageIdSchema, normalizeLanguage } from "@/lib/languages";
 export const runtime = "nodejs";
 const bodySchema = z.discriminatedUnion("action", [
   z
-    .object({ action: z.literal("start"), another: z.boolean().default(false) })
+    .object({
+      action: z.literal("start"),
+      another: z.boolean().default(false),
+      language: languageIdSchema.default("java"),
+    })
     .strict(),
   z
     .object({
@@ -25,7 +30,10 @@ const bodySchema = z.discriminatedUnion("action", [
 export async function GET(req: Request) {
   try {
     localRequest(req);
-    return json(prescriptionStatus(database()));
+    const lang = normalizeLanguage(
+      new URL(req.url).searchParams.get("language"),
+    );
+    return json(prescriptionStatus(database(), undefined, lang));
   } catch (e) {
     return failure(e);
   }
@@ -44,7 +52,7 @@ export async function POST(req: Request) {
     localRequest(req);
     const db = database();
     if (body.action === "start")
-      return json(startPrescription(db, body.another));
+      return json(startPrescription(db, body.another, undefined, body.language));
     answerCatalogRequest(db, body.jobId, body.requestId, body.data, body.error);
     return json({ ok: true });
   } catch (e) {

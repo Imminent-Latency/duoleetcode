@@ -6,6 +6,7 @@ import { latestCoaching } from "@/lib/coaching";
 import { latestReflection } from "@/lib/reflection";
 import { sandboxMode } from "@/lib/practice-storage.mjs";
 import { demoProblem } from "@/lib/demo";
+import { languageIdSchema } from "@/lib/languages";
 import { z } from "zod";
 export const runtime = "nodejs";
 export async function GET(req: Request) {
@@ -62,6 +63,7 @@ export async function POST(req: Request) {
         problem: problemSchema,
         budgetMs: z.number().int().min(60000).max(5400000),
         demonstration: z.boolean().default(false),
+        language: languageIdSchema.default("java"),
       })
       .parse(await req.json());
     localRequest(req);
@@ -77,7 +79,13 @@ export async function POST(req: Request) {
     if (body.problem.locked)
       throw new Error("This problem is unavailable to your connected account.");
     return json({
-      attempt: target.create(body.problem, body.budgetMs, demonstration),
+      attempt: target.create(
+        body.problem,
+        body.budgetMs,
+        demonstration,
+        undefined,
+        body.language,
+      ),
       serverTime: Date.now(),
     });
   } catch (e) {

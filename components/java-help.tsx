@@ -7,6 +7,7 @@ import ReviewFlagButton from "./review-flag";
 import AgentActivity from "./agent-activity";
 import ResearchSources from "./research-sources";
 import { api } from "@/lib/browser";
+import { languageConfig, type LanguageId } from "@/lib/languages";
 import type { JavaHelp, EvidenceEvent } from "@/lib/types";
 import type { EditorChatBinding } from "./use-editor-chat";
 import { ChatCodeContext, SavedCodeContext } from "./chat-code-context";
@@ -20,22 +21,28 @@ export function JavaHelpLog({
   attemptId,
   entries,
   onJump,
+  language = "java",
 }: {
   attemptId?: string;
   entries: JavaHelp[];
   onJump?: (h: JavaHelp) => void;
+  language?: LanguageId;
 }) {
+  const cfg = languageConfig(language);
   return (
     <>
       {entries.map((h) => (
         <article className="java-help-exchange" key={h.id}>
-          <span className="reflection-speaker">You · Java reference</span>
+          <span className="reflection-speaker">
+            You · {cfg.profileLabel} reference
+          </span>
           <CoachText>{h.question}</CoachText>
           <SavedCodeContext context={h.editor} />
           {h.answer ? (
             <>
               <span className="reflection-speaker">
-                Java help{h.kind === "redirect" ? " · Coaching deferred" : ""}
+                {cfg.helpLabel}
+                {h.kind === "redirect" ? " · Coaching deferred" : ""}
               </span>
               <CoachText sources={h.research?.sources}>{h.answer}</CoachText>
               <ResearchSources research={h.research} />
@@ -61,7 +68,7 @@ export function JavaHelpLog({
                       target="_blank"
                       rel="noopener noreferrer"
                     >
-                      Java documentation
+                      {cfg.shortLabel} documentation
                       {h.sources!.length > 1 ? ` ${i + 1}` : ""}
                     </a>
                   ))}
@@ -73,7 +80,7 @@ export function JavaHelpLog({
               {onJump
                 ? "No answer was delivered during this assessment."
                 : h.state === "pending"
-                  ? "Looking up the Java reference…"
+                  ? `Looking up the ${cfg.profileLabel} reference…`
                   : h.state === "failed"
                     ? "The lookup did not finish. Your question is saved."
                     : "Reply ready to open."}
@@ -97,6 +104,7 @@ export default function JavaHelpChat({
   onRecord,
   onClose,
   editor,
+  language = "java",
 }: {
   attemptId: string;
   initial: JavaHelp[];
@@ -105,7 +113,9 @@ export default function JavaHelpChat({
   onRecord: RecordHelp;
   onClose: () => void;
   editor: EditorChatBinding;
+  language?: LanguageId;
 }) {
+  const cfg = languageConfig(language);
   const [entries, setEntries] = useState(initial);
   const [draft, setDraft] = useState("");
   const [working, setWorking] = useState(false);
@@ -248,13 +258,13 @@ export default function JavaHelpChat({
     entries.at(-1)?.state === "failed" ? entries.at(-1) : undefined;
   const ready = entries.find((h) => h.state === "ready" && !h.deliveredAt);
   return (
-    <aside className="java-help-chat" aria-label="Java reference chat">
+    <aside className="java-help-chat" aria-label={`${cfg.shortLabel} reference chat`}>
       <div className="reflection-chat-heading">
         <MessageCircle size={17} />
-        <strong>Java help</strong>
+        <strong>{cfg.helpLabel}</strong>
         <Button
           className="icon-button"
-          aria-label="Close Java help"
+          aria-label={`Close ${cfg.helpLabel}`}
           onClick={onClose}
         >
           <X size={16} />
@@ -268,15 +278,18 @@ export default function JavaHelpChat({
         {!entries.length && (
           <div className="reflection-empty">
             <p>
-              Ask about a Java API, import, syntax rule, or compiler message.
+              Ask about a {cfg.profileLabel}{" "}
+              {cfg.id === "cpp"
+                ? "API, header, syntax rule, or compiler message."
+                : "API, import, syntax rule, or compiler message."}
             </p>
             <small>
-              Try “What does HashSet.add return?” Your cursor line and any
-              attached selection are included.
+              Try “{cfg.examplePrompt}” Your cursor line and any attached
+              selection are included.
             </small>
           </div>
         )}
-        <JavaHelpLog attemptId={attemptId} entries={entries} />
+        <JavaHelpLog attemptId={attemptId} entries={entries} language={cfg.id} />
         {working && (
           <AgentActivity
             attemptId={attemptId}
@@ -340,11 +353,11 @@ export default function JavaHelpChat({
         />
         <Textarea
           ref={input}
-          aria-label="Ask about Java"
+          aria-label={`Ask about ${cfg.shortLabel}`}
           placeholder={
             disabled
               ? "Resume the timer to ask a question"
-              : "Ask about Java APIs or syntax…"
+              : `Ask about ${cfg.profileLabel} APIs or syntax…`
           }
           value={draft}
           maxLength={5000}

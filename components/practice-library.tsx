@@ -13,6 +13,7 @@ import { api } from "@/lib/browser";
 import { replay } from "@/lib/recording";
 import { timeAtSequence } from "@/lib/reflection";
 import { buildTimelineProjection } from "@/lib/timeline-markers";
+import { languageConfig } from "@/lib/languages";
 import type { Attempt, AttemptSummary } from "@/lib/types";
 import { Button, Panel } from "./ui";
 import CoachText from "./coach-text";
@@ -191,8 +192,9 @@ export default function PracticeLibrary({
                 <div>
                   <strong>{a.title}</strong>
                   <p>
-                    {when(a.createdAt)} · {Math.round(a.budgetMs / 60000)} min
-                    budget · {a.events} events
+                    {languageConfig(a.language).shortLabel} · {when(a.createdAt)}{" "}
+                    · {Math.round(a.budgetMs / 60000)} min budget · {a.events}{" "}
+                    events
                   </p>
                 </div>
                 <span className={a.verdict === "Accepted" ? "positive" : ""}>
@@ -411,7 +413,8 @@ export function SavedSession({
       </div>
       <h2>{a.problem.title}</h2>
       <p>
-        {when(a.createdAt)} · {minutes} ·{" "}
+        {languageConfig(a.language).profileLabel} · {when(a.createdAt)} ·{" "}
+        {minutes} ·{" "}
         {a.demonstration ? "Test session" : "Recorded practice"}
       </p>
       <Tabs defaultValue="recording" keepMounted={false}>

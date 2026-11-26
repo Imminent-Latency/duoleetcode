@@ -5,14 +5,18 @@ import loader from "@monaco-editor/loader";
 import type * as Monaco from "monaco-editor";
 import { useEffect, useRef } from "react";
 import { java } from "@/lib/java";
+import { cpp } from "@/lib/cpp";
 import { importForCompletion, importQuickFixes } from "@/lib/java-imports";
 import { javaCompletions } from "@/lib/java-completions";
 import type { Edit, EditorContextDraft } from "@/lib/types";
 import { javaSnippets } from "@/lib/java-snippets";
+import { cppSnippets } from "@/lib/cpp-snippets";
+import { languageConfig, type LanguageId } from "@/lib/languages";
 import { installSpelling } from "./editor-spelling";
 loader.config({ paths: { vs: "/monaco/vs" } });
 type Props = {
   value: string;
+  language?: LanguageId;
   readOnly?: boolean;
   onEdit?: (value: string, edits: Edit[], origin: string) => void;
   diffFrom?: string;
@@ -32,10 +36,11 @@ type Props = {
 };
 export default function CodeEditor({
   value,
+  language = "java",
   readOnly = false,
   onEdit,
   diffFrom,
-  label = "Solution.java",
+  label,
   revealLine,
   onDiagnostics,
   diagnosticsRetry,
@@ -45,6 +50,8 @@ export default function CodeEditor({
   selectionResetKey,
   reviewTarget,
 }: Props) {
+  const lang = languageConfig(language);
+  const resolvedLabel = label ?? lang.filename;
   const flag = useReviewFlag();
   const flagRef = useRef({ flag, reviewTarget });
   flagRef.current = { flag, reviewTarget };
@@ -63,8 +70,8 @@ export default function CodeEditor({
     | Monaco.editor.IStandaloneDiffEditor
     | undefined
   >(undefined);
-  const latest = useRef({ value, readOnly, diffFrom, revealLine });
-  latest.current = { value, readOnly, diffFrom, revealLine };
+  const latest = useRef({ value, readOnly, diffFrom, revealLine, language: lang.id });
+  latest.current = { value, readOnly, diffFrom, revealLine, language: lang.id };
   const applying = useRef(false);
   const mountChat = (
     editor: Monaco.editor.IStandaloneCodeEditor,
@@ -83,7 +90,7 @@ export default function CodeEditor({
         selection = editor.getSelection();
       if (!model || !cursor) return;
       return {
-        file: "Solution.java",
+        file: languageConfig(latest.current.language).filename,
         cursor: {
           line: cursor.lineNumber,
           column: cursor.column,
@@ -236,6 +243,11 @@ export default function CodeEditor({
         command: "-editor.action.quickFix",
       }),
     );
+    const isCpp = lang.id === "cpp";
+    const markerOwner = isCpp ? "clangd" : "javacs";
+    const diagLabel = isCpp ? "C++26" : "Java";
+    const requestEngine = (method: string, data: Record<string, unknown>) =>
+      isCpp ? cpp().request(method, data) : java().request(method, data);
     let disposed = false;
     let checking = false;
     let checkAgain = false;
@@ -256,12 +268,12 @@ export default function CodeEditor({
         return;
       }
       const version = model.getVersionId();
-      monaco.editor.setModelMarkers(model, "javacs", []);
-      diagnosticCallback.current?.(0, "Checking Java…");
+      monaco.editor.setModelMarkers(model, markerOwner, []);
+      diagnosticCallback.current?.(0, `Checking ${diagLabel}…`);
       diagnosticTimer = setTimeout(async () => {
         checking = true;
         try {
-          const diagnostics = await java().request("diagnostics", {
+          const diagnostics = await requestEngine("diagnostics", {
             text: model.getValue(),
           });
           if (
@@ -270,32 +282,32 @@ export default function CodeEditor({
             version !== model.getVersionId()
           )
             return;
-          const markers: Monaco.editor.IMarkerData[] = diagnostics.map(
-            (d: any) => ({
-              startLineNumber: d.range.start.line + 1,
-              startColumn: d.range.start.character + 1,
-              endLineNumber: d.range.end.line + 1,
-              endColumn: d.range.end.character + 1,
-              message: d.message,
-              severity:
-                d.severity === 1
-                  ? monaco.MarkerSeverity.Error
-                  : d.severity === 2
-                    ? monaco.MarkerSeverity.Warning
-                    : monaco.MarkerSeverity.Info,
-              source: "Java",
-              code: d.code === undefined ? undefined : String(d.code),
-            }),
-          );
-          monaco.editor.setModelMarkers(model, "javacs", markers);
+          const markers: Monaco.editor.IMarkerData[] = (
+            Array.isArray(diagnostics) ? diagnostics : []
+          ).map((d: any) => ({
+            startLineNumber: d.range.start.line + 1,
+            startColumn: d.range.start.character + 1,
+            endLineNumber: d.range.end.line + 1,
+            endColumn: d.range.end.character + 1,
+            message: d.message,
+            severity:
+              d.severity === 1
+                ? monaco.MarkerSeverity.Error
+                : d.severity === 2
+                  ? monaco.MarkerSeverity.Warning
+                  : monaco.MarkerSeverity.Info,
+            source: diagLabel,
+            code: d.code === undefined ? undefined : String(d.code),
+          }));
+          monaco.editor.setModelMarkers(model, markerOwner, markers);
           const errors = markers.filter(
             (m) => m.severity === monaco.MarkerSeverity.Error,
           ).length;
           diagnosticCallback.current?.(
             errors,
             errors
-              ? `${errors} Java ${errors === 1 ? "error" : "errors"}`
-              : "No Java errors",
+              ? `${errors} ${diagLabel} ${errors === 1 ? "error" : "errors"}`
+              : `No ${diagLabel} errors`,
           );
         } catch (error) {
           if (
@@ -305,7 +317,7 @@ export default function CodeEditor({
           )
             diagnosticCallback.current?.(
               0,
-              "Java checks unavailable",
+              `${diagLabel} checks unavailable`,
               error instanceof Error ? error.message : String(error),
             );
         } finally {
@@ -318,8 +330,17 @@ export default function CodeEditor({
       }, 450);
     };
     retryDiagnostics.current = () => {
-      java().stop();
-      scheduleDiagnostics();
+      if (isCpp) {
+        void cpp()
+          .request("restart", {})
+          .catch(() => {})
+          .finally(() => {
+            if (!disposed) scheduleDiagnostics();
+          });
+      } else {
+        java().stop();
+        scheduleDiagnostics();
+      }
     };
     disposables.push({
       dispose: () => {
@@ -336,7 +357,7 @@ export default function CodeEditor({
       }),
     );
     scheduleDiagnostics();
-    disposables.push(installSpelling(editor, monaco));
+    disposables.push(installSpelling(editor, monaco, lang.id));
     let pasted = false;
     const dom = editor.getDomNode();
     const paste = () => {
@@ -380,7 +401,7 @@ export default function CodeEditor({
         r.end.character + 1,
       );
     disposables.push(
-      monaco.languages.registerCodeActionProvider("java", {
+      monaco.languages.registerCodeActionProvider(lang.monacoLanguage, {
         async provideCodeActions(model, selection, context, token) {
           const empty = { actions: [], dispose() {} };
           if (
@@ -388,6 +409,64 @@ export default function CodeEditor({
             editor.getOption(monaco.editor.EditorOption.readOnly)
           )
             return empty;
+          const version = model.getVersionId();
+          const source = model.getValue();
+          const lspRange = (r: Monaco.IRange) => ({
+            start: {
+              line: r.startLineNumber - 1,
+              character: r.startColumn - 1,
+            },
+            end: { line: r.endLineNumber - 1, character: r.endColumn - 1 },
+          });
+          if (isCpp) {
+            const markers = context.markers.filter(
+              (marker) => marker.source === "C++26",
+            );
+            if (!markers.length) return empty;
+            try {
+              const actions = await cpp().request("codeActions", {
+                text: source,
+                range: lspRange(selection),
+                diagnostics: markers.map((marker) => ({
+                  range: lspRange(marker),
+                  code:
+                    typeof marker.code === "object"
+                      ? marker.code.value
+                      : marker.code,
+                  message: marker.message,
+                  severity:
+                    marker.severity === monaco.MarkerSeverity.Error ? 1 : 2,
+                })),
+              });
+              if (
+                token.isCancellationRequested ||
+                model.isDisposed() ||
+                version !== model.getVersionId() ||
+                !Array.isArray(actions)
+              )
+                return empty;
+              return {
+                actions: actions.map((action: any) => ({
+                  title: action.title,
+                  kind: "quickfix",
+                  diagnostics: markers,
+                  edit: {
+                    edits: (action.edits ?? []).map((e: any) => ({
+                      resource: model.uri,
+                      versionId: version,
+                      textEdit: {
+                        range: range(e.range),
+                        text: e.newText,
+                      },
+                    })),
+                  },
+                })),
+                dispose() {},
+              };
+            } catch {
+              return empty;
+            }
+          }
           const unresolved = context.markers.filter((marker) =>
             [
               "compiler.err.cant.resolve",
@@ -399,15 +478,6 @@ export default function CodeEditor({
             ),
           );
           if (!unresolved.length) return empty;
-          const version = model.getVersionId();
-          const source = model.getValue();
-          const lspRange = (r: Monaco.IRange) => ({
-            start: {
-              line: r.startLineNumber - 1,
-              character: r.startColumn - 1,
-            },
-            end: { line: r.endLineNumber - 1, character: r.endColumn - 1 },
-          });
           try {
             const result = await java().request("codeActions", {
               text: source,
@@ -466,6 +536,50 @@ export default function CodeEditor({
         },
       }),
     );
+    if (isCpp) {
+      disposables.push(
+        monaco.languages.registerHoverProvider("cpp", {
+          async provideHover(model, position, token) {
+            if (model !== editor.getModel()) return null;
+            const version = model.getVersionId();
+            try {
+              const res = await cpp().request("inspect", {
+                text: model.getValue(),
+                position: {
+                  line: position.lineNumber - 1,
+                  character: position.column - 1,
+                },
+              });
+              if (
+                token.isCancellationRequested ||
+                model.isDisposed() ||
+                version !== model.getVersionId()
+              )
+                return null;
+              const raw = res?.hover?.contents;
+              if (!raw) return null;
+              const contents = Array.isArray(raw)
+                ? raw.map((c: any) =>
+                    typeof c === "string"
+                      ? { value: c }
+                      : { value: String(c?.value ?? "") },
+                  )
+                : typeof raw === "string"
+                  ? [{ value: raw }]
+                  : [{ value: String(raw.value ?? "") }];
+              if (!contents.some((c: any) => c.value.trim().length > 0))
+                return null;
+              return {
+                range: res.hover.range ? range(res.hover.range) : undefined,
+                contents,
+              };
+            } catch {
+              return null;
+            }
+          },
+        }),
+      );
+    }
     // Reuse Monaco's marker hover and action picker for all entry points.
     // Right-click moves the cursor before building the menu, so this context
     // key follows the error the user clicked rather than their previous cursor.
@@ -517,15 +631,19 @@ export default function CodeEditor({
     ) => {
       const word = model.getWordUntilPosition(pos);
       const edit = item.textEdit;
+      const cleanLabel = isCpp
+        ? String(item.label ?? "").replace(/^\s*(?:•\s*)?/, "")
+        : String(item.label ?? "");
       const autoImport =
-        item._autoImport ??
-        ([7, 8].includes(item.kind) && !item.data?.memberName
-          ? importForCompletion(
-              model.getValue(),
-              item.data?.className ?? item.detail ?? "",
-              pos.lineNumber - 1,
-            )
-          : undefined);
+        !isCpp &&
+        (item._autoImport ??
+          ([7, 8].includes(item.kind) && !item.data?.memberName
+            ? importForCompletion(
+                model.getValue(),
+                item.data?.className ?? item.detail ?? "",
+                pos.lineNumber - 1,
+              )
+            : undefined));
       const importPosition = autoImport
         ? model.getPositionAt(autoImport.offset)
         : undefined;
@@ -534,11 +652,11 @@ export default function CodeEditor({
         16, 14, 6, 10, 11, 24,
       ];
       return {
-        label: item.label,
+        label: cleanLabel,
         kind: kinds[item.kind ?? 1] ?? 18,
         detail: item.detail,
         documentation: item.documentation?.value ?? item.documentation,
-        insertText: edit?.newText ?? item.insertText ?? item.label,
+        insertText: edit?.newText ?? item.insertText ?? cleanLabel,
         insertTextRules:
           item.insertTextFormat === 2
             ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
@@ -554,7 +672,7 @@ export default function CodeEditor({
                 word.endColumn,
               ),
         sortText: item.sortText,
-        filterText: item.filterText,
+        filterText: item.filterText ?? cleanLabel,
         additionalTextEdits: [
           ...(item.additionalTextEdits?.map((x: any) => ({
             range: range(x.range),
@@ -581,9 +699,10 @@ export default function CodeEditor({
         _position: pos,
       } as Monaco.languages.CompletionItem;
     };
+    const activeSnippets = isCpp ? cppSnippets : javaSnippets;
     disposables.push(
-      monaco.languages.registerCompletionItemProvider("java", {
-        triggerCharacters: ["."],
+      monaco.languages.registerCompletionItemProvider(lang.monacoLanguage, {
+        triggerCharacters: isCpp ? [".", ">", ":"] : ["."],
         provideCompletionItems: async (
           model: Monaco.editor.ITextModel,
           pos: Monaco.Position,
@@ -597,7 +716,7 @@ export default function CodeEditor({
             return { suggestions: [] };
           const version = model.getVersionId();
           const word = model.getWordUntilPosition(pos);
-          const snippets = javaSnippets
+          const snippets = activeSnippets
             .filter(
               (s) => word.word.length > 0 && s.label.startsWith(word.word),
             )
@@ -617,15 +736,20 @@ export default function CodeEditor({
           if (snippets.some((s) => s.label === word.word))
             return { suggestions: snippets };
           try {
-            const result = await javaCompletions(
-              (method, data) => java().request(method, data),
-              model.getValue(),
-              { line: pos.lineNumber - 1, character: pos.column - 1 },
-              () =>
-                token.isCancellationRequested ||
-                model.isDisposed() ||
-                version !== model.getVersionId(),
-            );
+            const result = isCpp
+              ? await cpp().request("completion", {
+                  text: model.getValue(),
+                  position: { line: pos.lineNumber - 1, character: pos.column - 1 },
+                })
+              : await javaCompletions(
+                  (method, data) => java().request(method, data),
+                  model.getValue(),
+                  { line: pos.lineNumber - 1, character: pos.column - 1 },
+                  () =>
+                    token.isCancellationRequested ||
+                    model.isDisposed() ||
+                    version !== model.getVersionId(),
+                );
             if (
               token.isCancellationRequested ||
               model.isDisposed() ||
@@ -644,7 +768,7 @@ export default function CodeEditor({
                 : (result?.isIncomplete ?? false),
             };
           } catch (error) {
-            console.warn("Java completion failed", String(error));
+            console.warn(`${diagLabel} completion failed`, String(error));
             return { suggestions: snippets };
           }
         },
@@ -653,7 +777,7 @@ export default function CodeEditor({
           token: Monaco.CancellationToken,
         ) => {
           const meta = item as any;
-          if (!meta._lsp?.data) return item;
+          if (isCpp || !meta._lsp?.data) return item;
           try {
             const resolved = await java().request("resolve", {
               item: meta._lsp,
@@ -701,7 +825,7 @@ export default function CodeEditor({
     // Monaco's fixed shadow-root menu loses standalone theme variables.
     // Keep widgets in the themed document so menus and quick fixes stay legible.
     useShadowDOM: false,
-    ariaLabel: label,
+    ariaLabel: resolvedLabel,
     renderLineHighlight: "line",
     bracketPairColorization: { enabled: true },
   };
@@ -713,11 +837,11 @@ export default function CodeEditor({
       if (latest.current.diffFrom !== undefined) {
         const original = monaco.editor.createModel(
           latest.current.diffFrom,
-          "java",
+          lang.monacoLanguage,
         );
         const modified = monaco.editor.createModel(
           latest.current.value,
-          "java",
+          lang.monacoLanguage,
         );
         const editor = monaco.editor.createDiffEditor(container.current, {
           ...options,
@@ -731,7 +855,10 @@ export default function CodeEditor({
         mountChat(editor.getModifiedEditor(), monaco, disposables);
         disposables.push(editor, original, modified);
       } else {
-        const model = monaco.editor.createModel(latest.current.value, "java");
+        const model = monaco.editor.createModel(
+          latest.current.value,
+          lang.monacoLanguage,
+        );
         const editor = monaco.editor.create(container.current, {
           ...options,
           readOnly: latest.current.readOnly,
@@ -755,7 +882,7 @@ export default function CodeEditor({
       current.current = undefined;
       for (const disposable of disposables) disposable.dispose();
     };
-  }, [diffFrom !== undefined]);
+  }, [diffFrom !== undefined, lang.id]);
   useEffect(() => {
     if (diagnosticsRetry) retryDiagnostics.current?.();
   }, [diagnosticsRetry]);
