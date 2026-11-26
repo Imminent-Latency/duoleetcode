@@ -264,7 +264,7 @@ export function extractStructuredJson(raw: string): any {
 export function parseAcpModelId(
   modelId: string,
 ): { provider: AcpProviderId; rawModel: string } | null {
-  for (const prefix of ["claude-acp", "agy-acp", "codex-acp"] as const) {
+  for (const prefix of ["claude-acp", "codex-acp"] as const) {
     if (modelId.startsWith(prefix + "/")) {
       const rawModel = modelId.slice(prefix.length + 1).trim();
       if (rawModel) return { provider: prefix, rawModel };
@@ -337,22 +337,6 @@ export function resolveAcpAdapterSpec(
         MCP_PROTOCOL_NEGOTIATION: "legacy",
         ...(claudeBin ? { CLAUDE_CODE_EXECUTABLE: claudeBin } : {}),
       },
-    };
-  }
-  if (provider === "agy-acp") {
-    const agyBin = findOutsideNodeModules("agy", process.env.DUO_AGY_BIN);
-    if (!agyBin) return null;
-    return {
-      id: "agy-acp",
-      label: "Antigravity (Gemini · ACP)",
-      shortPrefix: "Antigravity",
-      command: agyBin,
-      args: [
-        "acp",
-        "--process-per-session",
-        "--include-default-customizations=false",
-      ],
-      env: {},
     };
   }
   if (provider === "codex-acp") {
@@ -899,7 +883,7 @@ export class AcpRuntimePool {
             }))
         : [];
       const models: AgentModel[] = rawModels.map((m) => {
-        // Check if availableModels restricts specific effort variants on agy-acp.
+        // Check if availableModels restricts specific effort variants.
         const specificEfforts =
           availIds.size > 0
             ? normalizedEfforts.filter(
@@ -929,9 +913,6 @@ export class AcpRuntimePool {
         const auth = this.checkClaudeCliAuth();
         signedIn = auth.signedIn;
         plan = auth.plan;
-      } else if (provider === "agy-acp") {
-        plan = session?._meta?.antigravity?.tier?.name ?? null;
-        signedIn = Boolean(plan || models.length > 0);
       } else if (provider === "codex-acp") {
         plan = "ChatGPT";
       }
@@ -947,7 +928,7 @@ export class AcpRuntimePool {
           plan,
           detail: signedIn
             ? `${spec.label}${plan ? ` · ${plan}` : ""} (${models.length} models)`
-            : `Sign in via local ${provider === "claude-acp" ? "claude login" : provider === "agy-acp" ? "agy acp --login" : "codex login"}`,
+            : `Sign in via local ${provider === "claude-acp" ? "claude auth login" : "codex login"}`,
           modelCount: models.length,
         },
       };
@@ -974,7 +955,7 @@ export class AcpRuntimePool {
   }
 
   async listModels(
-    providers: AcpProviderId[] = ["claude-acp", "agy-acp", "codex-acp"],
+    providers: AcpProviderId[] = ["claude-acp", "codex-acp"],
   ): Promise<AgentModel[]> {
     const catalogs = await Promise.all(
       providers.map((p) => this.inspectProvider(p)),
@@ -983,7 +964,7 @@ export class AcpRuntimePool {
   }
 
   async statuses(
-    providers: AcpProviderId[] = ["claude-acp", "agy-acp"],
+    providers: AcpProviderId[] = ["claude-acp"],
   ): Promise<AcpProviderStatus[]> {
     const catalogs = await Promise.all(
       providers.map((p) => this.inspectProvider(p)),
@@ -1057,9 +1038,6 @@ export class AcpRuntimePool {
     const supportsClientSystemPrompt = Boolean(
       init?.agentCapabilities?.sessionCapabilities?.systemPrompt,
     );
-    const supportsAgyAppend = Boolean(
-      init?.agentCapabilities?._meta?.antigravity?.systemPrompt?.append,
-    );
 
     const newSessionParams: Record<string, any> = {
       cwd: this.workspaceDir,
@@ -1073,13 +1051,6 @@ export class AcpRuntimePool {
           }
         : {}),
       _meta: {
-        ...(supportsAgyAppend
-          ? {
-              antigravity: {
-                systemPrompt: { append: structuredInstruction },
-              },
-            }
-          : {}),
         ...(provider === "claude-acp"
           ? {
               claudeCode: {
@@ -1387,10 +1358,9 @@ export class AcpRuntimePool {
         onPreemptCleanup?: () => void;
       },
     ) => {
-      const promptBody =
-        !supportsClientSystemPrompt && !supportsAgyAppend
-          ? `${structuredInstruction}\n\nINPUT:\n${JSON.stringify(payload)}`
-          : JSON.stringify(payload);
+      const promptBody = !supportsClientSystemPrompt
+        ? `${structuredInstruction}\n\nINPUT:\n${JSON.stringify(payload)}`
+        : JSON.stringify(payload);
       options.trace?.event("turn.input", {
         ordinal: turnCounter + 1,
         payload,

@@ -1,6 +1,5 @@
 // End-to-end live verification of role-paired Low-effort ACP teams:
 // 1. Claude Team (Low): Opus 5.5 for coaching & reflection v10 + Sonnet 5.5 for Java help
-// 2. Gemini Team (Low): Gemini 4 Neon for coaching & reflection v10 + Gemini 3.8 Flash for Java help
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -79,12 +78,12 @@ try {
   agent().includeAcpModels = true;
   const catalog = await agent().models();
   const profiles = availableTeamProfiles(catalog).filter(
-    (p) => p.id === "claude-low" || p.id === "gemini-low",
+    (p) => p.id === "claude-low",
   );
   assert.equal(
     profiles.length,
-    2,
-    "Both claude-low and gemini-low role-paired team profiles must be discovered",
+    1,
+    "claude-low role-paired team profile must be discovered",
   );
 
   for (const team of profiles) {

@@ -120,7 +120,6 @@ export type AgentSettings = z.infer<typeof agentSettingsSchema>;
 export type AgentProviderId =
   | "codex"
   | "claude-acp"
-  | "agy-acp"
   | "codex-acp";
 export type AgentModel = {
   model: string;
@@ -167,7 +166,7 @@ export function validateAgentChoice(choice: AgentChoice, models: AgentModel[]) {
 }
 
 export type AgentTeamProfile = {
-  id: "openai-low" | "claude-low" | "gemini-low";
+  id: "openai-low" | "claude-low";
   label: string;
   provider: string;
   philosophy: string;
@@ -223,22 +222,6 @@ export function availableTeamProfiles(models: AgentModel[]): AgentTeamProfile[] 
         "Opus 5.5 for reflection, evaluation & coaching · Sonnet 5.5 for reference help & next-problem planning",
       deepCandidates: ["claude-acp/opus", "claude-acp/fable", "claude-acp/claude-opus-5"],
       fastCandidates: ["claude-acp/sonnet", "claude-acp/haiku", "claude-acp/claude-sonnet-5"],
-    },
-    {
-      id: "gemini-low",
-      label: "Gemini Team (Low)",
-      provider: "Antigravity · ACP",
-      philosophy:
-        "Gemini 4 Neon for reflection, evaluation & coaching · Gemini 3.8 Flash for reference help & next-problem planning",
-      deepCandidates: [
-        "agy-acp/gemini-4-neon",
-        "agy-acp/gemini-4-carbon",
-        "agy-acp/gemini-4-argon",
-      ],
-      fastCandidates: [
-        "agy-acp/gemini-3.8-flash",
-        "agy-acp/gemini-4-hydrogen",
-      ],
     },
   ];
 

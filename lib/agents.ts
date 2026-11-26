@@ -485,7 +485,7 @@ export class AgentRuntime {
       codexDetail = e instanceof Error ? e.message : String(e);
     }
     const acpStatuses: AcpProviderStatus[] = this.includeAcpModels
-      ? await this.acp.statuses(["claude-acp", "agy-acp"]).catch(() => [])
+      ? await this.acp.statuses(["claude-acp"]).catch(() => [])
       : [];
     const providers: AcpProviderStatus[] = [
       {

@@ -1435,7 +1435,7 @@ export default function Workspace() {
                   detail={
                     agentStatus?.signedIn
                       ? `Connected (${agentStatus.provider || "Local AI"})`
-                      : "Connect Codex, Claude, or Antigravity"
+                      : "Connect Codex or Claude"
                   }
                 />
                 <Button
@@ -1556,8 +1556,8 @@ export default function Workspace() {
                 </span>
                 <h2>AI learning team</h2>
                 <p>
-                  Codex, Claude (Claude Agent SDK · ACP), and Antigravity
-                  (Gemini · ACP). Choose models per feature in Agent settings.
+                  Codex and Claude (Claude Agent SDK · ACP). Choose models per
+                  feature in Settings.
                 </p>
                 {Array.isArray(agentStatus?.providers) &&
                 agentStatus.providers.length > 0 ? (

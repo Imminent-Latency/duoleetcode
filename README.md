@@ -25,7 +25,6 @@ DuoLeetCode is designed to be self-hosted on **`127.0.0.1`** on your own machine
 - **At least one AI runtime** *(optional — needed for AI coaching, Java help, and problem selection; reuses existing local CLI subscriptions with no API keys required)*:
   - **OpenAI (Codex):** Codex CLI (`npm install -g @openai/codex`) → `codex login`
   - **Claude (Claude SDK · ACP):** Claude Code CLI (`npm install -g @anthropic-ai/claude-code`) → `claude auth login` *(or set `ANTHROPIC_API_KEY`; `@agentclientprotocol/claude-agent-acp` is installed automatically by `npm install`)*
-  - **Gemini (Antigravity · ACP):** Antigravity CLI (`agy`) on `PATH` → `agy acp --login`
 
 ---
 
@@ -66,7 +65,6 @@ Sign in to whichever provider(s) you plan to use on the same machine running the
 | --- | --- | --- |
 | **OpenAI Team (Low)** *(Astra + Sol)* | Install `codex` CLI (`@agentclientprotocol/codex-acp` is bundled) | Run `codex login` (ChatGPT Plus / Pro / Team) |
 | **Claude Team (Low)** *(Opus 5.5 + Sonnet 5.5)* | `@agentclientprotocol/claude-agent-acp` & `@anthropic-ai/claude-agent-sdk` are installed by `npm install`; install `claude` CLI for subscription auth | Run `claude auth login` (Claude Pro / Max) or export `ANTHROPIC_API_KEY` |
-| **Gemini Team (Low)** *(Gemini 4 Neon + 3.8 Flash)* | Install Antigravity CLI (`agy`) on `PATH` | Run `agy acp --login` (Google AI / Antigravity plan) |
 
 ---
 
@@ -95,7 +93,7 @@ Open **[http://127.0.0.1:4318/](http://127.0.0.1:4318/)** in the **same Chromium
 ### 5. First-Run Setup in the App
 
 1. **LeetCode:** Click **Sign in to LeetCode** on **Today** or **Connections**. A centered sign-in popup opens, logs you in, and closes itself automatically once connected (no LeetCode tab needs to stay open afterward). You can also try the offline local exercise anytime via **Connections → Open a demo assessment**.
-2. **Choose your AI Team in Agent settings:** Before `.local/agent-settings.json` exists, the default baseline model is `gpt-6.1-sol` (Codex). If you are using **Claude** or **Gemini / Antigravity** (or want the two-tier Astra + Sol OpenAI pairing), open **Agent settings** in the left sidebar, select **OpenAI Team (Low)**, **Claude Team (Low)**, or **Gemini Team (Low)**—or customize individual features—and click **Save agent settings**.
+2. **Choose your AI Team in Settings:** Before `.local/agent-settings.json` exists, the default baseline model is `gpt-6.1-sol` (Codex). If you are using **Claude** (or want the two-tier Astra + Sol OpenAI pairing), open **Settings** in the left sidebar, select **OpenAI Team (Low)** or **Claude Team (Low)**—or customize individual features—and click **Save settings**.
 3. **In-browser Java & local C++26:** `javacs` warms automatically in a Web Worker for Java 25 semantic completion and compiler diagnostics (requires internet/CDN access for CheerpJ runtime assets), while C++26 uses a local `clangd` process (`-std=c++26`, configured automatically with LeetCode's standard headers and helper type extraction). **Run** and **Submit** execute on LeetCode's judge in the chosen language (`java` or `cpp`).
 
 ### Optional Self-Hosting Environment Variables
@@ -109,7 +107,7 @@ Open **[http://127.0.0.1:4318/](http://127.0.0.1:4318/)** in the **same Chromium
 | `DUO_SETTINGS_FILE` | Override the saved agent settings JSON path | `.local/agent-settings.json` |
 | `DUO_AGENT_MODEL` | Override default baseline model before `.local/agent-settings.json` is created | `gpt-6.1-sol` |
 | `DUO_PORT` | Override local HTTP port | `4318` |
-| `DUO_CODEX_BIN` / `DUO_CLAUDE_BIN` / `DUO_AGY_BIN` | Explicit binary paths if `codex`, `claude`, or `agy` are outside standard `PATH` | Auto-discovered on `PATH` |
+| `DUO_CODEX_BIN` / `DUO_CLAUDE_BIN` | Explicit binary paths if `codex` or `claude` are outside standard `PATH` | Auto-discovered on `PATH` |
 | `DUO_CLANGD_BIN` | Explicit `clangd` binary path for C++26 diagnostics, completion, and hover | Homebrew LLVM or `/usr/bin/clangd` |
 
 ## What's implemented
@@ -169,7 +167,7 @@ Run `DUO_DATABASE=:memory: DUO_TRACE_DATABASE=.local/question-review-update.sqli
 - `lib/recording.ts`: atomic edit application, checkpoint replay, and candidate moments.
 - `lib/browser.ts`: extension RPC and IndexedDB recovery buffer.
 - `lib/java.ts`, `public/java/worker.js`: browser JVM/LSP adapter.
-- `lib/agents.ts`, `lib/acp-runtime.ts`, `tools/acp-mcp-bridge.mjs`: local Codex app-server and ACP v1 runtimes (Claude Agent SDK, Antigravity Gemini, Codex ACP), private Unix-socket MCP bridge, scoped evidence tools, role prompts, and output schemas.
+- `lib/agents.ts`, `lib/acp-runtime.ts`, `tools/acp-mcp-bridge.mjs`: local Codex app-server and ACP v1 runtimes (Claude Agent SDK, Codex ACP), private Unix-socket MCP bridge, scoped evidence tools, role prompts, and output schemas.
 - `lib/agent-settings.ts`: shared feature registry, platform presets and capability validation; `lib/agent-settings-store.ts` owns local persistence.
 - `lib/java-reference.ts`, `lib/java-help-service.ts`, and `components/java-help.tsx`: scoped documentation tool, recorded reference conversation, and assessment chat.
 - `lib/reflection-policy.ts`: model-independent coaching policy; `lib/reflection.ts` owns structured evidence validation.
@@ -203,7 +201,7 @@ Restore checks integrity and always writes a new file. Inspect the restored libr
 
 **Why this problem?** shows the selected evidence and its original source links. **Choose another** excludes the current suggestion without counting it as an attempt or a skill signal. **Prepare session** carries the suggested timebox into preparation; the timer starts only when you start the assessment. An unfinished assessment or learning session takes priority. Manual catalog browsing remains available.
 
-Prescription uses **Agent settings → Next activity**, including its configured model and effort (such as Sol, Sonnet 5.5, or Gemini 3.8 Flash at Low). It offers no solution hints or editorials. Tool calls are bounded; an unavailable bridge or model produces a retryable error instead of a hidden fixed recommendation. A failed alternate search preserves the last verified suggestion.
+Prescription uses **Settings → Next activity**, including its configured model and effort (such as Sol or Sonnet 5.5 at Low). It offers no solution hints or editorials. Tool calls are bounded; an unavailable bridge or model produces a retryable error instead of a hidden fixed recommendation. A failed alternate search preserves the last verified suggestion.
 
 The latest prescription is reused across refreshes for up to a day while its history, evidence, preferences, and model settings remain unchanged. Its evidence receipt, model/effort, source references, and skipped choices are stored in SQLite `memory_uses` and travel with **Memory usage receipts** in snapshots/exports. A reset or correction invalidates in-flight stale selections. This is evidence-informed selection, not a calibrated spaced-repetition or mastery model.
 
@@ -213,7 +211,7 @@ Open **Coach memory** in the sidebar. **Preferences** shows what the coach may r
 
 **Skill evidence** searches dated observations from real assessments, original focused-practice responses, later coached understanding, and already-imported notes. Sources retain their attempt, quote, evaluation revision, and assistance context. Correct a coach interpretation or exclude it from future historical retrieval without rewriting the original record. Earlier assessments remain inspectable. This ledger is evidence, not a permanent mastery score. **What the coach used** records which preference revisions and historical observations were supplied to each successful agent run.
 
-Memory is available after a real assessment ends and to the next-problem planner before an assessment. Assessment-time Java help and test sessions do not receive personal practice history. Current corrections accompany the current attempt, and historical retrieval honors exclusions. Preferences never override technical evidence or assessment boundaries. The existing role harnesses share scoped memory tools; no separate memory agent or higher reasoning setting is required. Every agent remains at Low effort by default using the active role-paired team (Astra/Sol, Opus/Sonnet, or Gemini 4 Neon/3.8 Flash) or Custom choices.
+Memory is available after a real assessment ends and to the next-problem planner before an assessment. Assessment-time Java help and test sessions do not receive personal practice history. Current corrections accompany the current attempt, and historical retrieval honors exclusions. Preferences never override technical evidence or assessment boundaries. The existing role harnesses share scoped memory tools; no separate memory agent or higher reasoning setting is required. Every agent remains at Low effort by default using the active role-paired team (Astra/Sol or Opus/Sonnet) or Custom choices.
 
 Memory, evidence, corrections, and usage receipts live in the same SQLite file as their practice library and are included in snapshots and JSON exports. The schema migration indexes existing records only; the broader Pages import remains a preview. Implementations are in `lib/learner-memory.ts`, `lib/learner-context.ts`, and `components/coach-memory.tsx`.
 

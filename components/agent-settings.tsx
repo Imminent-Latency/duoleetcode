@@ -293,7 +293,7 @@ export default function AgentSettings({
                       model below.
                     </Text>
                   </div>
-                  <SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
+                  <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
                     {teamProfiles.map((profile) => {
                       const active = matchesProfile(profile);
                       return (
@@ -349,8 +349,8 @@ export default function AgentSettings({
               <div>
                 <Title order={3}>Feature configuration</Title>
                 <Text size="sm" c="dimmed" mt={2}>
-                  All discovered models across Codex, Claude (Claude SDK · ACP),
-                  and Antigravity (Gemini · ACP) can be mixed per feature.
+                  All discovered models across Codex and Claude (Claude SDK ·
+                  ACP) can be mixed per feature.
                 </Text>
               </div>
               <Badge variant="light">

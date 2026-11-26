@@ -27,17 +27,11 @@ async function main() {
     const claudeModel =
       models.find((m) => m.model === "claude-acp/haiku") ??
       models.find((m) => m.provider === "claude-acp");
-    const agyModel =
-      models.find((m) => m.model === "agy-acp/gemini-3.8-flash") ??
-      models.find(
-        (m) => m.provider === "agy-acp" && m.model.includes("gemini"),
-      );
 
     if (!claudeModel) throw new Error("No claude-acp model discovered");
-    if (!agyModel) throw new Error("No agy-acp Gemini model discovered");
 
     const results: Record<string, any> = {};
-    for (const candidate of [claudeModel, agyModel]) {
+    for (const candidate of [claudeModel]) {
       const started = Date.now();
       let toolCalls = 0;
       const effort = candidate.efforts.includes("low")

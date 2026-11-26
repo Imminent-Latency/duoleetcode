@@ -167,22 +167,22 @@ test("parseAcpModelId distinguishes ACP provider models from native Codex models
     provider: "claude-acp",
     rawModel: "sonnet",
   });
-  assert.deepEqual(parseAcpModelId("agy-acp/gemini-4-neon"), {
-    provider: "agy-acp",
-    rawModel: "gemini-4-neon",
+  assert.deepEqual(parseAcpModelId("codex-acp/gpt-6.1-sol"), {
+    provider: "codex-acp",
+    rawModel: "gpt-6.1-sol",
   });
+  assert.equal(parseAcpModelId("agy-acp/gemini-4-neon"), null);
+  assert.equal(isAcpModelId("agy-acp/gemini-4-neon"), false);
 
   const profiles = availableTeamProfiles([
     { model: "gpt-6-astra", name: "Astra", efforts: ["low", "high"] },
     { model: "gpt-6.1-sol", name: "Sol", efforts: ["low", "medium"] },
     { model: "claude-acp/opus", name: "Claude · Opus 5.5", efforts: ["low", "high"] },
     { model: "claude-acp/sonnet", name: "Claude · Sonnet 5.5", efforts: ["low", "high"] },
-    { model: "agy-acp/gemini-4-neon", name: "Antigravity · Gemini 4 Neon", efforts: ["low", "high"] },
-    { model: "agy-acp/gemini-3.8-flash", name: "Antigravity · Gemini 3.8 Flash", efforts: ["low", "high"] },
   ]);
   assert.deepEqual(
     profiles.map((p) => p.id),
-    ["openai-low", "claude-low", "gemini-low"],
+    ["openai-low", "claude-low"],
   );
   const claudeTeam = profiles.find((p) => p.id === "claude-low")!;
   assert.equal(claudeTeam.features.reflection.model, "claude-acp/opus");
@@ -190,11 +190,6 @@ test("parseAcpModelId distinguishes ACP provider models from native Codex models
   assert.equal(claudeTeam.features.evaluation.model, "claude-acp/opus");
   assert.equal(claudeTeam.features.reference.model, "claude-acp/sonnet");
   assert.equal(claudeTeam.features.planning.model, "claude-acp/sonnet");
-
-  const geminiTeam = profiles.find((p) => p.id === "gemini-low")!;
-  assert.equal(geminiTeam.features.reflection.model, "agy-acp/gemini-4-neon");
-  assert.equal(geminiTeam.features.reference.model, "agy-acp/gemini-3.8-flash");
-  assert.equal(geminiTeam.features.planning.model, "agy-acp/gemini-3.8-flash");
 });
 
 test("AcpRuntimePool + AgentRuntime execute end-to-end ACP turns with MCP Unix-socket tools, JSON fence repair, and permission guard", async () => {
@@ -222,7 +217,6 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         protocolVersion: 1,
         agentCapabilities: {
           sessionCapabilities: { systemPrompt: { mode: { override: {} } }, close: {} },
-          _meta: { antigravity: { systemPrompt: { append: true } } },
         },
         agentInfo: { name: "fixture-acp", version: "0.1.0" },
       },
@@ -236,10 +230,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       result: {
         sessionId: "acp-session-1",
         configOptions: [
-          { id: "model", category: "model", options: [{ value: "gemini-test", name: "Gemini Test" }] },
+          { id: "model", category: "model", options: [{ value: "claude-test", name: "Claude Test" }] },
           { id: "thought_level", category: "thought_level", options: [{ value: "low", name: "Low" }] },
         ],
-        _meta: { antigravity: { tier: { name: "Test Tier" } } },
       },
     });
     return;
@@ -269,6 +262,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (msg.id === pendingBashId && msg.result) {
     const bashDenied = msg.result.outcome?.optionId === "deny";
+    const allowedTools = sessionParams?._meta?.claudeCode?.options?.allowedTools ?? [];
+    const claudeToolsOk = allowedTools.includes("mcp__duoleetcode__custom_lookup");
     const mcp = sessionParams.mcpServers?.[0];
     if (!mcp) {
       send({
@@ -277,7 +272,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           sessionId: "acp-session-1",
           update: {
             sessionUpdate: "agent_message_chunk",
-            content: { type: "text", text: JSON.stringify({ bashDenied, toolResult: null }) },
+            content: { type: "text", text: JSON.stringify({ bashDenied, claudeToolsOk, toolResult: null }) },
           },
         },
       });
@@ -292,7 +287,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "custom_lookup", arguments: { key: "alpha" } } }) + "\\n");
       } else if (reply.id === 11) {
         const parsedTool = JSON.parse(reply.result.content[0].text);
-        const wrapped = "\`\`\`json\\n" + JSON.stringify({ bashDenied, toolResult: parsedTool }) + "\\n\`\`\`";
+        const wrapped = "\`\`\`json\\n" + JSON.stringify({ bashDenied, claudeToolsOk, toolResult: parsedTool }) + "\\n\`\`\`";
         send({
           method: "session/update",
           params: {
@@ -318,19 +313,20 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   );
 
   const pool = new AcpRuntimePool(path.join(tempDir, "workspace"), (id) =>
-    id === "agy-acp"
+    id === "claude-acp"
       ? {
-          id: "agy-acp",
-          label: "Fixture Antigravity ACP",
+          id: "claude-acp",
+          label: "Fixture Claude ACP",
           shortPrefix: "Fixture",
           command: process.execPath,
           args: [fixtureScript],
         }
       : null,
   );
+  (pool as any).checkClaudeCliAuth = () => ({ signedIn: true, plan: "test-max" });
 
   const runtime = new AgentRuntime(() => ({
-    ...lowSettings("agy-acp/gemini-test"),
+    ...lowSettings("claude-acp/claude-test"),
     preset: "custom",
   }));
   runtime.acp = pool;
@@ -342,7 +338,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   try {
     const models = await runtime.models();
     assert.equal(models.length, 1);
-    assert.equal(models[0].model, "agy-acp/gemini-test");
+    assert.equal(models[0].model, "claude-acp/claude-test");
 
     const out = await runtime.run(
       "reflection coach",
@@ -350,7 +346,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       { test: true },
       {
         type: "object",
-        properties: { bashDenied: { type: "boolean" }, toolResult: {} },
+        properties: {
+          bashDenied: { type: "boolean" },
+          claudeToolsOk: { type: "boolean" },
+          toolResult: {},
+        },
       },
       undefined,
       undefined,
@@ -378,8 +378,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       },
     );
 
-    assert.equal(out.model, "agy-acp/gemini-test");
+    assert.equal(out.model, "claude-acp/claude-test");
     assert.equal(out.value.bashDenied, true);
+    assert.equal(out.value.claudeToolsOk, true);
     assert.deepEqual(out.value.toolResult, { echoedKey: "alpha", count: 42 });
   } finally {
     runtime.close();
