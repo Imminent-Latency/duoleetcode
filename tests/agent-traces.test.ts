@@ -11,6 +11,7 @@ import {
   traced,
   traceFile,
 } from "../lib/agent-traces";
+import { presentTraceDetail } from "../lib/agent-trace-presentation";
 import { lowSettings } from "../lib/agent-settings";
 import { GET, POST } from "../app/api/diagnostics/route";
 
@@ -393,4 +394,184 @@ test("diagnostics API protects local data and requires explicit clear intent", a
     400,
   );
   assert.equal((await GET(req("GET", "http://127.0.0.1:4318"))).status, 200);
+});
+
+test("UI trace presentation folds delta streams, pairs tools, unwraps JSON envelopes, and leaves DB/raw/export intact", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "duo-trace-view-"));
+  const file = path.join(dir, "diagnostics.sqlite");
+  const prevTraceDb = process.env.DUO_TRACE_DATABASE;
+  process.env.DUO_TRACE_DATABASE = file;
+  const db = new TraceStore(file);
+  try {
+    // 1. Completed planner-like run with callId=0, double-encoded tool JSON,
+    //    ACP-style usage updates between deltas and message.completed, and reasoning summary deltas.
+    const planner = db.start({
+      role: "planner",
+      kind: "model",
+      mode: "test",
+      model: "test-model",
+      effort: "low",
+    });
+    planner.event("turn.started", { ordinal: 1, turnId: "t1" });
+    planner.event("tool.started", {
+      callId: 0,
+      tool: "search_problems",
+      arguments: { difficulty: "EASY", search: "Merge" },
+    });
+    planner.event("tool.completed", {
+      callId: 0,
+      tool: "search_problems",
+      durationMs: 420,
+      result: {
+        success: true,
+        contentItems: [
+          {
+            type: "inputText",
+            text: JSON.stringify({
+              totalNum: 1,
+              questions: [{ titleSlug: "merge-two-sorted-lists" }],
+            }),
+          },
+        ],
+      },
+    });
+    planner.event("reasoning.summary.delta", {
+      turnId: "t1",
+      itemId: "rs_1",
+      summaryIndex: 0,
+      delta: "**Checking ",
+    });
+    planner.event("reasoning.summary.delta", {
+      turnId: "t1",
+      itemId: "rs_1",
+      summaryIndex: 0,
+      delta: "catalog**",
+    });
+    planner.event("reasoning.summary.completed", {
+      turnId: "t1",
+      itemId: "rs_1",
+      summary: ["**Checking catalog**"],
+    });
+    const fullReply = JSON.stringify({
+      slug: "merge-two-sorted-lists",
+      reason: "Targeted linked-list practice.",
+      minutes: 30,
+      kind: "new-challenge",
+      evidenceIds: ["ev-1"],
+    });
+    for (const chunk of [
+      '{"slug":',
+      '"merge-two-sorted-lists",',
+      fullReply.slice(33),
+    ]) {
+      planner.event("message.delta", { ordinal: 1, turnId: "t1", text: chunk });
+    }
+    planner.event("usage.updated", {
+      turnId: "t1",
+      tokenUsage: { used: 1000, size: 100000 },
+    });
+    planner.event("usage.updated", {
+      turnId: "t1",
+      tokenUsage: { totalTokens: 1200, inputTokens: 1000, outputTokens: 200 },
+    });
+    planner.event("message.completed", {
+      ordinal: 1,
+      turnId: "t1",
+      text: fullReply,
+    });
+    planner.event("turn.completed", {
+      ordinal: 1,
+      turn: {
+        id: "t1",
+        status: "completed",
+        items: [{ type: "agentMessage", text: fullReply }],
+      },
+      output: fullReply,
+    });
+    planner.finish("succeeded");
+
+    // Raw DB detail and export remain completely untouched.
+    const rawDetail = db.detail(planner.id);
+    assert.equal(
+      rawDetail.events.filter((e) => e.kind === "message.delta").length,
+      3,
+    );
+    assert.equal(
+      rawDetail.events.filter((e) => e.kind === "tool.started").length,
+      1,
+    );
+    assert.equal(
+      db.export(planner.id).runs[0].events.length,
+      rawDetail.events.length,
+    );
+
+    // API default GET returns post-processed presentation view; raw=1 returns raw events.
+    const req = (query: string) =>
+      new Request(`http://127.0.0.1:4318/api/diagnostics?${query}`, {
+        headers: { host: "127.0.0.1:4318", origin: "http://127.0.0.1:4318" },
+      });
+    const uiRes = await (await GET(req(`id=${planner.id}`))).json();
+    assert.equal(uiRes.view, "condensed");
+    assert.equal(uiRes.rawEventCount, rawDetail.events.length);
+    assert.equal(
+      uiRes.events.filter((e: any) => e.kind === "message.delta").length,
+      0,
+    );
+    assert.equal(
+      uiRes.events.filter((e: any) => e.kind === "reasoning.summary.delta")
+        .length,
+      0,
+    );
+
+    const toolCall = uiRes.events.find((e: any) => e.kind === "tool.call");
+    assert.ok(toolCall);
+    assert.equal(toolCall.seqLabel, "3–4");
+    assert.match(toolCall.summary, /search_problems.*420ms/);
+    assert.equal(toolCall.data.output.totalNum, 1);
+
+    const coalescedUsage = uiRes.events.find(
+      (e: any) => e.kind === "usage.updated",
+    );
+    assert.equal(coalescedUsage.collapsedCount, 2);
+    assert.match(coalescedUsage.summary, /1,200 tokens.*2 updates/);
+
+    const completedMsg = uiRes.events.find(
+      (e: any) => e.kind === "message.completed",
+    );
+    assert.equal(completedMsg.data.stream.chunks, 3);
+    assert.equal(completedMsg.data.output.slug, "merge-two-sorted-lists");
+
+    const rawRes = await (await GET(req(`id=${planner.id}&raw=1`))).json();
+    assert.equal(rawRes.view, "raw");
+    assert.equal(rawRes.events.length, rawDetail.events.length);
+    assert.equal(
+      rawRes.events.filter((e: any) => e.kind === "message.delta").length,
+      3,
+    );
+
+    // 2. Interrupted run without message.completed preserves collapsed message.stream & in-progress tool.
+    const partial = db.start({ role: "planner", mode: "test" });
+    partial.event("message.delta", { ordinal: 1, text: '{"slug":"two-' });
+    partial.event("message.delta", { ordinal: 1, text: 'sum"' });
+    partial.event("tool.started", {
+      callId: 1,
+      tool: "inspect_problem",
+      arguments: { slug: "two-sum" },
+    });
+    partial.finish("interrupted", "Stopped mid-stream");
+
+    const partialView = presentTraceDetail(db.detail(partial.id));
+    const stream = partialView.events.find((e) => e.kind === "message.stream");
+    assert.ok(stream);
+    assert.equal(stream.seqLabel, "2–3");
+    assert.equal((stream.data as any).text, '{"slug":"two-sum"');
+    const inFlight = partialView.events.find((e) => e.kind === "tool.started");
+    assert.ok(inFlight);
+    assert.match(inFlight.summary ?? "", /inspect_problem.*in progress/);
+  } finally {
+    if (prevTraceDb === undefined) delete process.env.DUO_TRACE_DATABASE;
+    else process.env.DUO_TRACE_DATABASE = prevTraceDb;
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

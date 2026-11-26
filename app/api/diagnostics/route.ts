@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { traces } from "@/lib/agent-traces";
+import { presentTraceDetail } from "@/lib/agent-trace-presentation";
 import { localRequest, json, failure } from "@/lib/http";
 export const runtime = "nodejs";
 export async function GET(req: Request) {
@@ -8,6 +9,7 @@ export async function GET(req: Request) {
     const q = z
       .object({
         id: z.string().uuid().optional(),
+        raw: z.literal("1").optional(),
         export: z.literal("1").optional(),
         usage: z.literal("1").optional(),
         role: z.string().max(100).optional(),
@@ -22,13 +24,19 @@ export async function GET(req: Request) {
     const db = traces();
     if (q.usage) return json(db.usageSummary(q.mode ?? "practice"));
     if (q.export) return json(db.export(q.id));
+    if (q.id) {
+      const detail = db.detail(q.id);
+      return json(
+        q.raw
+          ? { ...detail, rawEventCount: detail.events.length, view: "raw" }
+          : presentTraceDetail(detail),
+      );
+    }
     return json(
-      q.id
-        ? db.detail(q.id)
-        : db.list({
-            ...q,
-            mode: q.mode === "all" ? undefined : q.mode,
-          }),
+      db.list({
+        ...q,
+        mode: q.mode === "all" ? undefined : q.mode,
+      }),
     );
   } catch (e) {
     return failure(e);

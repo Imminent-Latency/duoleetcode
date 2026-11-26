@@ -14,7 +14,11 @@ import ReviewFlags from "./review-flags";
 import ReviewFlagButton from "./review-flag";
 import UsageDiagnostics from "./usage-diagnostics";
 import { api } from "@/lib/browser";
-import type { TraceRun, TraceDetail } from "@/lib/agent-trace-types";
+import type {
+  TraceRun,
+  TraceDetail,
+  TraceEvent,
+} from "@/lib/agent-trace-types";
 import QuestionReviewDetails from "./question-review-details";
 import { questionReviewSchema } from "@/lib/question-review";
 
@@ -99,6 +103,7 @@ function TraceDiagnostics({
   const [role, setRole] = useState("");
   const [status, setStatus] = useState("");
   const [mode, setMode] = useState("");
+  const [rawEvents, setRawEvents] = useState(false);
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -132,11 +137,13 @@ function TraceDiagnostics({
     }
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
-    setDetail(undefined);
+    setDetail((prev) => (prev?.run.id === selected ? prev : undefined));
     setError("");
     const refresh = async () => {
       try {
-        const data: TraceDetail = await api(`/api/diagnostics?id=${selected}`);
+        const data: TraceDetail = await api(
+          `/api/diagnostics?id=${selected}${rawEvents ? "&raw=1" : ""}`,
+        );
         if (!live) return;
         setDetail(data);
         if (data.family.some((r) => r.status === "running"))
@@ -150,7 +157,7 @@ function TraceDiagnostics({
       live = false;
       clearTimeout(timer);
     };
-  }, [selected]);
+  }, [selected, rawEvents]);
   async function action(fn: () => Promise<void>) {
     setError("");
     setBusy(true);
@@ -390,7 +397,38 @@ function TraceDiagnostics({
                   </Button>
                 ))}
               </div>
-              <h3>Recorded events</h3>
+              <div className="diagnostic-events-header">
+                <div>
+                  <h3>Recorded events</h3>
+                  {detail.rawEventCount !== undefined &&
+                    detail.view === "condensed" &&
+                    detail.rawEventCount > detail.events.length && (
+                      <small className="diagnostic-events-meta">
+                        Showing {detail.events.length} condensed items from{" "}
+                        {detail.rawEventCount.toLocaleString()} raw events
+                      </small>
+                    )}
+                  {detail.view === "raw" && (
+                    <small className="diagnostic-events-meta">
+                      Showing all {detail.events.length.toLocaleString()} raw
+                      events
+                    </small>
+                  )}
+                </div>
+                {(rawEvents ||
+                  (detail.rawEventCount ?? detail.events.length) >
+                    detail.events.length) && (
+                  <Button
+                    size="xs"
+                    variant="default"
+                    onClick={() => setRawEvents((v) => !v)}
+                  >
+                    {rawEvents
+                      ? "Condensed view"
+                      : `Raw events (${(detail.rawEventCount ?? detail.events.length).toLocaleString()})`}
+                  </Button>
+                )}
+              </div>
               {detail.events
                 .filter((e) => e.kind === "questions.review")
                 .map((e) => {
@@ -400,16 +438,26 @@ function TraceDiagnostics({
                   ) : null;
                 })}
               {detail.events.map((e) => (
-                <details className="diagnostic-event" key={e.seq}>
+                <details
+                  className="diagnostic-event"
+                  key={`${e.seq}-${e.kind}`}
+                >
                   <summary>
-                    <span>
-                      {e.seq}. {e.kind}
+                    <span className="diagnostic-event-title">
+                      <strong>
+                        {e.seqLabel ?? e.seq}. {e.kind}
+                      </strong>
+                      {e.summary && (
+                        <span className="diagnostic-event-summary">
+                          {e.summary}
+                        </span>
+                      )}
                     </span>
-                    <small>
+                    <small className="diagnostic-event-time">
                       +{((e.at - detail.run.startedAt) / 1000).toFixed(2)}s
                     </small>
                   </summary>
-                  <pre>{JSON.stringify(e.data, null, 2)}</pre>
+                  <DiagnosticEventBody event={e} raw={detail.view === "raw"} />
                 </details>
               ))}
             </>
@@ -529,4 +577,109 @@ function TraceDiagnostics({
       </Modal>
     </section>
   );
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function formatBlock(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function DiagnosticEventBody({
+  event,
+  raw,
+}: {
+  event: TraceEvent;
+  raw?: boolean;
+}) {
+  if (raw || !isRecord(event.data)) {
+    return <pre>{JSON.stringify(event.data, null, 2)}</pre>;
+  }
+
+  const d = event.data;
+
+  if (event.kind === "tool.call") {
+    return (
+      <div className="diagnostic-event-sections">
+        <div className="diagnostic-section-label">Arguments</div>
+        <pre>{formatBlock(d.arguments ?? {})}</pre>
+        {d.error !== undefined && (
+          <>
+            <div className="diagnostic-section-label">Error</div>
+            <pre className="diagnostic-error">{formatBlock(d.error)}</pre>
+          </>
+        )}
+        {d.output !== undefined && (
+          <>
+            <div className="diagnostic-section-label">Output</div>
+            <pre>{formatBlock(d.output)}</pre>
+          </>
+        )}
+        {d.abandoned && (
+          <div className="diagnostic-section-note">
+            Tool call did not complete before the turn ended ({d.durationMs}ms).
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (
+    (event.kind === "message.completed" || event.kind === "message.stream") &&
+    (d.output !== undefined || typeof d.text === "string")
+  ) {
+    const stream = isRecord(d.stream) ? d.stream : undefined;
+    const streamInfo = stream
+      ? `Streamed in ${stream.chunks} message.delta chunks (${((stream.durationMs ?? 0) / 1000).toFixed(2)}s · events #${stream.seqRange?.[0]}–${stream.seqRange?.[1]})`
+      : typeof d.chunks === "number"
+        ? `Partial stream · ${d.chunks} message.delta chunks (${((d.durationMs ?? 0) / 1000).toFixed(2)}s)`
+        : null;
+    return (
+      <div className="diagnostic-event-sections">
+        {streamInfo && (
+          <div className="diagnostic-section-note">{streamInfo}</div>
+        )}
+        <pre>{d.output !== undefined ? formatBlock(d.output) : d.text}</pre>
+      </div>
+    );
+  }
+
+  if (event.kind === "request" && typeof d.instructions === "string") {
+    const { instructions, ...rest } = d;
+    return (
+      <div className="diagnostic-event-sections">
+        <details className="diagnostic-subblock">
+          <summary>
+            Prompt instructions ({instructions.length.toLocaleString()} chars)
+          </summary>
+          <pre>{instructions}</pre>
+        </details>
+        <div className="diagnostic-section-label">Input &amp; schema</div>
+        <pre>{JSON.stringify(rest, null, 2)}</pre>
+      </div>
+    );
+  }
+
+  if (
+    event.kind === "thread.configuration" &&
+    typeof d.baseInstructions === "string"
+  ) {
+    const { baseInstructions, ...rest } = d;
+    return (
+      <div className="diagnostic-event-sections">
+        <details className="diagnostic-subblock">
+          <summary>
+            Base instructions ({baseInstructions.length.toLocaleString()} chars)
+          </summary>
+          <pre>{baseInstructions}</pre>
+        </details>
+        <div className="diagnostic-section-label">Session parameters</div>
+        <pre>{JSON.stringify(rest, null, 2)}</pre>
+      </div>
+    );
+  }
+
+  return <pre>{JSON.stringify(d, null, 2)}</pre>;
 }

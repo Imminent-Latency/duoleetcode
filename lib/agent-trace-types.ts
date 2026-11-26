@@ -20,14 +20,21 @@ export type TraceRun = {
 };
 export type TraceEvent = {
   seq: number;
+  endSeq?: number;
+  seqLabel?: string;
   at: number;
+  endedAt?: number;
   kind: string;
+  summary?: string;
+  collapsedCount?: number;
   data: unknown;
 };
 export type TraceDetail = {
   run: TraceRun;
   family: TraceRun[];
   events: TraceEvent[];
+  rawEventCount?: number;
+  view?: "condensed" | "raw";
 };
 export type UsageTotals = {
   calls: number;
@@ -45,11 +52,7 @@ export type UsageBucket = UsageTotals & {
   label: string;
 };
 export type UsageWindowKey =
-  | "last5h"
-  | "last24h"
-  | "last7d"
-  | "last30d"
-  | "allTime";
+  "last5h" | "last24h" | "last7d" | "last30d" | "allTime";
 export type UsageWindowSummary = UsageTotals & {
   windowKey: UsageWindowKey;
   label: string;
