@@ -1,35 +1,36 @@
-# Design Specification (v8): Hierarchical Skill Ratings, Concept Stability & Pacing Director
+# Design Specification (v9): Hierarchical Skill Ratings, Concept Stability & Pacing Director
 
 > [!NOTE]
-> **Design specification (v8 — ready for implementation)** — extends v7 with the adaptive onboarding, **Purposeful Easy Reinforcement**, Practice-Only self-pick policy, Focus/Avoid domain controls, Drain-Before-Prescribe barrier, and interactive Prescription Coach rules aligned in [`PRESCRIPTION_AND_ONBOARDING_DESIGN.md`](./PRESCRIPTION_AND_ONBOARDING_DESIGN.md). Every equation, SQLite DDL/constraint, state transition, resolver rule, Director rule, and §5 metric is implemented and strictly asserted in [`tests/skill-ratings-sim.test.ts`](../tests/skill-ratings-sim.test.ts).
+> **Design specification (v9 — ready for implementation)** — extends v8 with difficulty-anchored timeboxes (`ΔD_time`), `+50%` ability clocks + coached-revisit fallbacks for `<950` learners, `"foundations"` default onboarding tier, `signatureForced` Selection disguise guards, single-flight atomic job drains, launch-ledger anti-loop tracking, 100% practice-only self-picks, Focus Slot 0 dedication (`D2`), and `0.5×` Easy Reinforcement concept credit (`D3`), aligned with [`PRESCRIPTION_AND_ONBOARDING_DESIGN.md`](./PRESCRIPTION_AND_ONBOARDING_DESIGN.md) (v2). Every equation, SQLite DDL/constraint, state transition, resolver rule, Director rule, and §5 metric is implemented and strictly asserted in [`tests/skill-ratings-sim.test.ts`](../tests/skill-ratings-sim.test.ts).
 
 ---
 
-## Summary of Changes from v7 → v8
+## Summary of Changes from v8 → v9
 
-| Area | Change in v8 |
+| Area | Change in v9 |
 | :--- | :--- |
-| **Purposeful Easy Reinforcement & Failure Breaker** | Replaced static strongest-domain `Momentum` (Slot 4) and added a **reactive 2-miss circuit breaker** (`consecutiveMisses >= 2` or single harsh onboarding miss `score <= 0.40`): preempts with an approachable **`easy-reinforcement`** session (`[θ - 210, θ - 135]`, $E \in [0.72, 0.82]$, `12–15m`, `preferEasy: true`), targeting recent 14-day struggles first, then fragile/near-due Track B concepts, then rusty, then strongest domain (with anti-loop suppression preventing back-to-back Easy Reinforcement). |
-| **Adaptive Onboarding & Visibility (`prescribedCount < 4`)** | Added 1-tap informed starting tiers (`foundations`, `interview-prep`, `experienced`) shifting ONLY Session #1's band while keeping $\mu_0 = 1000 \pm 220$, bundled 12 free seed problems (`ONBOARDING_SEED_PROBLEMS`), adaptive per-attempt step-up/ease-down across 4 core domains, and hidden rating calibration UI until **`prescribedGradedCount >= 4`** (`isRatingRevealed`). |
-| **Practice-Only Self-Picks (`rated = false`)** | Self-picked catalog launches run unrated for Track A & onboarding calibration while retaining the Check-In gate, separate Big-O calibration, Coach Memory, positive Track B concept transitions, and light domain cooldowns (`recentDomains`). |
-| **Drain-Before-Prescribe & Interactive Steering** | Added deterministic single-flight `drainPendingRatingJobs` barrier ordered by `launchSeq ASC`; added `focusDomains` (`<= 3`, `-35` LCB bias on Growth) & `mutedDomains` (`>= 4` Easy-backed domains unmuted); defined `steeredDomainExplicit` ($w_{\text{sel}} = 0$ only when user names today's single exact domain/technique). |
+| **Timebox Scaling & `ΔD_time` (`F1`, `F2`)** | Anchors `standardMinutes(D)` (`15/20/25/35/45m`) to problem difficulty `D`; applies `ΔD_time = clamp(-45, +45, round(-75 * ln(max(10, T) / max(10, T_std))))` (`D_eff = clamp(750, 1850, round(D + ΔD_time))`); keeps `±5m` Prepare manual timer edits (`1–90m` UI) rated via `ΔD_time` (`> ±5m` runs unrated); grants `<950` (and `backtracking < 1060`) Easy Reinforcement a `+50%` `ability` clock + coached-revisit (`>= 5d`) fallback when fresh `<= 830` supply `< 3`; sets default Welcome tier to **`"foundations"`**. |
+| **Atomic Drain, Composite & Breaker (`F4`, `F9`, `F16`)** | Single-flight `drainPendingRatingJobs` (`WeakMap` coordinator + atomic `claimOwnerId`/`claimExpiresAt` lease, `maxJobAttempts = 3`) with `attempt-graded` guard before marking `'failed'`; order-independent weighted composite `lastPrescribedImplScore` & `lastPrescribedDifficulty`; launch-ledger tracking of `lastPrescribedSlotKind` and `missStreakConsumedByBreaker` so AI outages never loop in Easy Reinforcement. |
+| **`signatureForced` Selection Guard (`F13`)** | Caches `SIGNATURE_FORCED_SLUGS` (`tree`, `binary-tree`, `binary-search-tree`, `linked-list`, `doubly-linked-list`) on `catalog_problems.signatureForced`; domains with `< 5` disguisable candidates disable `Selection` and omit `selOffset - 0.6*selSigma` from Growth LCB. |
+| **Practice-Only Self-Picks (`F17`)** | Self-picked catalog launches (`prescribed = 0, rated = 0`) record **zero** Track A rating updates AND **zero** Track B concept transitions (`concepts` untouched), updating only `lastPracticedDomain` (`prevDomain`-only cooldown; never consuming the 6-attempt prescribed window). |
+| **Focus Slot 0 & `0.5×` Easy Concept Credit (`D2`, `D3`)** | **Slot 0 Growth** is dedicated to eligible pinned `focusDomains` (`Slot 2` stays true lowest-LCB across all eligible domains); Easy Reinforcement grows already-`applied` concept stability at **`0.5×`** rate while keeping full `coached → applied` (`12d`) promotion and lapsed refresh. |
 
-*(Previous v6 Combined Review fixes `F1`–`F12`, `D1`, and all 8 smaller issues remain preserved in full below.)*
+*(Previous v6/v7/v8 foundations remain preserved in full below.)*
 
 ---
 
 ## 1. Taxonomy, Local Catalog Contract, 53-Slug Resolver & 24-Concept Catalogue
 
-### 1.1 Track A — 13 Rated Domains, Extension Bridge & Local Catalog Cache (`F3`)
+### 1.1 Track A — 13 Rated Domains, Extension Bridge & Local Catalog Cache (`F3`, `F10`, `F13`, `F18`)
 
-Build-time catalog contract across three files (detailed in [`PRESCRIPTION_AND_ONBOARDING_DESIGN.md`](./PRESCRIPTION_AND_ONBOARDING_DESIGN.md#L61-L79)):
+Build-time catalog contract across three files (detailed in [`PRESCRIPTION_AND_ONBOARDING_DESIGN.md`](./PRESCRIPTION_AND_ONBOARDING_DESIGN.md)):
 1. [`spikes/leetcode/client.mjs`](../spikes/leetcode/client.mjs): Preserve `acRate` (`0..100`) and `topicTags { name slug }` on list items; allow `limit <= 100` alongside optional `tag` and `orderBy` (`"AC_RATE_DESC" | "AC_RATE_ASC"`); read live `status().isPremium`. Validation schemas in [`lib/validation.ts`](../lib/validation.ts) and [`lib/prescription.ts`](../lib/prescription.ts) preserve both fields.
 2. [`spikes/leetcode/extension/client.mjs`](../spikes/leetcode/extension/client.mjs): Tracked copy of `spikes/leetcode/client.mjs`. Every edit to `client.mjs` **must** re-run `npm run leetcode:extension` so both files stay identical.
 3. [`spikes/leetcode/extension/bridge.mjs:105-109`](../spikes/leetcode/extension/bridge.mjs): Forward `{ skip, limit, search, difficulty, tag, orderBy }` intact to `LeetCodeClient.list` (clamping `1 <= limit <= 100`), asserted in extension bridge unit tests.
 
 **Local Catalog Cache (`catalog_problems`) & Shortlisting (`selectCandidatesFromCache`):**
-- Background sync populates SQLite `catalog_problems` (~38 `limit: 100` pages, 7-day TTL + incremental refresh), precomputing `resolvedDomain`, `baseDifficulty`, and `excluded` (`database | shell | concurrency | interactive | design | data-stream`).
-- **Deterministic Filtering:** Filter `!excluded`, `isPremium || !isPaidOnly` (live account tier!), `!excludedSlugs`, **`resolvedDomain === intent.targetDomain`**, concept `searchTagSlug` (when probing/consolidating), `isTitleDisguisedForTarget` when `targetFacet === "selection"`, then apply `preferEasy` (Easy problems inside `[lo - 40, hi + 40]` before general pool) and full-pool `snapCandidatePool`. Planner receives 12–15 shortlisted candidates and runs only `inspect_problem` statement-fit & disguise confirmation (`search_problems` removed).
+- Background sync (`CatalogSyncManager` via `/api/catalog-sync`) populates SQLite `catalog_problems` (`limit = 100` resumable pages, 7-day TTL + incremental refresh), precomputing `resolvedDomain`, `baseDifficulty`, `signatureForced` (`SIGNATURE_FORCED_SLUGS`), and `excluded` (`database | shell | concurrency | interactive | design | data-stream`).
+- **Deterministic Filtering & Ordering (`F10`):** Filter `!excluded`, `isPremium || !isPaidOnly` (live account tier!), `!excludedSlugs`, `status !== "ac"` (except `allowCoachedRevisit` coached candidates `>= 5d` old when fresh pool `< 3`), **`resolvedDomain === intent.targetDomain`**, `standardMinutes(D) <= maxMinutes`, concept `searchTagSlug` (when probing/consolidating), and `!signatureForced && isTitleDisguisedForTarget` when `targetFacet === "selection"`. Apply `preferEasy` (Easy problems inside `[lo - 40, hi + 40]` before general pool), full-pool `snapCandidatePool`, sort by **`20`-pt distance buckets** from band midpoint + seeded hash, and return **`up to 15`** candidates (`search_problems` removed from Planner).
 
 | Canonical Order | Domain ID | Display Name | Catalog Difficulty Floor | Min $\mu_0$ Gate | Primary Query Slugs |
 | :---: | :--- | :--- | :---: | :---: | :--- |
@@ -103,20 +104,23 @@ Concepts store exposure state and calendar-day stability—**never `1000` rating
 - **Steady-State Global Bleed Guard:** At floors ($\sigma_0 = 20, \sigma_{d,\text{impl}} = 45$), global variance share is $\frac{20^2}{20^2 + 45^2} = \mathbf{16.5\%}$ (`83.5%` domain-local).
 - **Provisional Domain Display (`F9`):** Domain facet scores display a **Provisional** indicator while `isDomainProvisional(sigma) = sigma > 80` (~first 6–10 attempts in that domain).
 
-### 2.2 Overlapping Difficulty Mapping ($D$), Empty-Band Snap & Expected Score ($E$)
+### 2.2 Overlapping Difficulty Mapping ($D$), Timebox Adjustment ($\Delta D_{\text{time}}$), Empty-Band Snap & Expected Score ($E$)
 1. **Overlapping Base Difficulty ($a = \text{acRatePct} / 100 \in [0, 1]$, structural modifier $\Delta D \in [-50, +50]$):**
    - **Easy:** $D_{\text{base}} = 800 + 280 \cdot \text{clamp}_{[0,1]}\!\left(\frac{0.85 - a}{0.55}\right) \in [800,\; 1080]$
    - **Medium:** $D_{\text{base}} = 980 + 420 \cdot \text{clamp}_{[0,1]}\!\left(\frac{0.80 - a}{0.55}\right) \in [980,\; 1400]$
    - **Hard:** $D_{\text{base}} = 1340 + 460 \cdot \text{clamp}_{[0,1]}\!\left(\frac{0.70 - a}{0.50}\right) \in [1340,\; 1800]$
-   - Final $D = \text{clamp}_{[800, 1850]}(\text{round}(D_{\text{base}} + \Delta D))$. When $\mu_0 < 800$ (e.g., `738.14`), target bands clamp to `[800, 830]`, yielding $E(738, 800) \approx 0.39$ and `+75` upside on the first clean solve.
-2. **Empty-Band Snap Rule (`snapCandidatePool`):** Over the full locally-cached domain pool, try `[L, U]` → `[L - 60, U + 60]` → nearest 3 candidates by $|D_{\text{base}} - \text{mid}|$ (or next eligible domain). When `preferEasy === true`, Easy candidates in `[L - 40, U + 40]` are preferred first.
-3. **Expected Score ($L = 320, q = \frac{\ln 10}{320}, \sigma_p = 55, g(\sigma_p) \approx 0.9770$):**
-   $$E(\theta, D) = \frac{1}{1 + 10^{-g(\sigma_p)(\theta - D)/320}}$$
+   - Base difficulty $D = \text{clamp}_{[800, 1850]}(\text{round}(D_{\text{base}} + \Delta D))$. When $\mu_0 < 800$ (e.g., `738.14`), target bands clamp to `[800, 830]`, yielding $E(738, 800) \approx 0.39$ and `+75` upside on the first clean solve.
+2. **Standard Clock & Timebox Difficulty Coupling (`standardMinutes` & `timeAdjustedDifficulty`, `F1`, `F2`):**
+   - **`standardMinutes(D)`:** `<= 950 → 15m`, `<= 1080 → 20m`, `<= 1250 → 25m`, `<= 1400 → 35m`, `> 1400 → 45m`.
+   - **`ΔD_time`:** For prescribed/chosen minutes $T$ vs. $T_{\text{std}} = \text{standardMinutes}(D)$, $\Delta D_{\text{time}} = \text{clamp}_{[-45, +45]}\!\left(\text{round}\!\left(-75 \cdot \ln\frac{\max(10, T)}{\max(10, T_{\text{std}})}\right)\right)$, giving **`D_eff = clamp(750, 1850, round(D + ΔD_time))`** (e.g., `+50%` `22m` ability clock on `800` Easy with `15m` standard gives `D_eff = 771`). Manual Prepare UI edits within `±5m` stay rated via `D_eff`; larger manual edits run unrated (`rated = false`).
+3. **Empty-Band Snap Rule (`snapCandidatePool`):** Over the full locally-cached domain pool, try `[L, U]` → `[L - 60, U + 60]` → nearest 3 candidates by $|D_{\text{base}} - \text{mid}|$ (or next eligible domain). When `preferEasy === true`, Easy candidates in `[L - 40, U + 40]` are preferred first.
+4. **Expected Score ($L = 320, q = \frac{\ln 10}{320}, \sigma_p = 55, g(\sigma_p) \approx 0.9770$):**
+   $$E(\theta, D_{\text{eff}}) = \frac{1}{1 + 10^{-g(\sigma_p)(\theta - D_{\text{eff}})/320}}$$
    - **Easy Reinforcement (`[θ - 210, θ - 135]`):** $E \in [0.72,\; 0.82]$ · **Growth & Breadth (`[θ - 45, θ + 10]`):** $E \in [0.48,\; 0.58]$ · **Concept Probe (`[θ - 55, θ - 15]`):** $E \in [0.53,\; 0.60]$ · **Consolidation (`[θ - 40, θ + 5]`):** $E \in [0.49,\; 0.57]$ · **Stretch (`[θ + 10, θ + 65]`):** $E \in [0.39,\; 0.48]$.
 
 ### 2.3 Mutually Exclusive Rubric ($S \in [0, 1]$) & Single-Base Update Step
 
-Evaluated **top-to-bottom (first match wins)** per exercised domain ($\sum_d w_{d,\text{impl}} = 1$; $w_{d,\text{sel}} = 0$ on signature-forced inputs, `selectionSpoilerRevealed === true`, or explicit single-domain conversational steering `steeredDomainExplicit === true`). Row 1 outside help matches manual `"Record outside help"` (`event.type === "assistance" && !event.assistanceId` via [`components/assessment-menu.tsx:47`](../components/assessment-menu.tsx) and [`components/workspace.tsx:1537`](../components/workspace.tsx)) or explicit help disclosures; `attempt.javaHelp` carries zero penalty.
+Evaluated **top-to-bottom (first match wins)** per exercised domain ($\sum_d w_{d,\text{impl}} = 1$; $w_{d,\text{sel}} = 0$ on `signatureForced` inputs, `selectionSpoilerRevealed === true`, explicit single- or 2-domain steering `steeredDomainExplicit === true`, or `didCoachLeakSelectionTarget === true`). Row 1 outside help matches manual `"Record outside help"` (`event.type === "assistance" && !event.assistanceId` via [`components/assessment-menu.tsx:47`](../components/assessment-menu.tsx) and [`components/workspace.tsx:1537`](../components/workspace.tsx)) or explicit help disclosures; `attempt.javaHelp` carries zero penalty.
 
 | Precedence | Mutually Exclusive Attempt Outcome | $S_{d,\text{impl}}$ | $S_{d,\text{sel}}$ |
 | :---: | :--- | :---: | :---: |
@@ -133,19 +137,19 @@ Evaluated **top-to-bottom (first match wins)** per exercised domain ($\sum_d w_{
 **Simultaneous Intra-Attempt Update (`applyAttemptGraded`):**
 1. **Idle $\sigma$-Drift ($c_{\text{drift}} = 7.0\;\text{pts}/\sqrt{\text{day}}$, 21-day grace window):** $\sigma'(\Delta t) = \min(\sigma_{\max}, \sqrt{\sigma^2 + 49 \cdot \max(0, \Delta t - 21)})$, then snapshot pre-attempt state.
 2. **Single Global Base Update (`implementation` updates only):**
-   Normalize $\hat{w}_d$, $\tilde{w}_d = \hat{w}_d m_{\text{fam},d}$, $E_d = E(\mu_0^{\text{pre}} + \delta_{d,\text{impl}}^{\text{pre}}, D)$, $R_{\text{tot}} = \sum_d \tilde{w}_d(S_{d,\text{impl}} - E_d)$, $I_{\text{tot}} = \sum_d \tilde{w}_d q^2 g(\sigma_p)^2 E_d(1 - E_d)$, $\bar{\sigma}_{\text{dom}}^2 = \sum_d \hat{w}_d (\sigma_{d,\text{impl}}^{\text{pre}})^2$, $V_0 = (\sigma_0^{\text{pre}})^2 + \bar{\sigma}_{\text{dom}}^2$, $\alpha_0 = \frac{(\sigma_0^{\text{pre}})^2}{V_0}$:
+   Normalize $\hat{w}_d$, $\tilde{w}_d = \hat{w}_d m_{\text{fam},d}$, $E_d = E(\mu_0^{\text{pre}} + \delta_{d,\text{impl}}^{\text{pre}}, D_{\text{eff}})$, $R_{\text{tot}} = \sum_d \tilde{w}_d(S_{d,\text{impl}} - E_d)$, $I_{\text{tot}} = \sum_d \tilde{w}_d q^2 g(\sigma_p)^2 E_d(1 - E_d)$, $\bar{\sigma}_{\text{dom}}^2 = \sum_d \hat{w}_d (\sigma_{d,\text{impl}}^{\text{pre}})^2$, $V_0 = (\sigma_0^{\text{pre}})^2 + \bar{\sigma}_{\text{dom}}^2$, $\alpha_0 = \frac{(\sigma_0^{\text{pre}})^2}{V_0}$:
    $$\mu_0 \leftarrow \mu_0^{\text{pre}} + \alpha_0 \frac{q g(\sigma_p) R_{\text{tot}}}{V_0^{-1} + I_{\text{tot}}}, \qquad \sigma_0 \leftarrow \max\!\left(20,\; \left((\sigma_0^{\text{pre}})^{-2} + \alpha_0 I_{\text{tot}}\right)^{-1/2}\right)$$
    *(First-attempt note: on `Selection = 0.75, Implementation = 0.40` while $\sigma_0 = 220$, $\mu_0$ dips ~`7` pts more than $\delta_{d,\text{sel}}$ rises, while $\delta_{d,\text{sel}} > 0 > \delta_{d,\text{impl}}$ immediately captures stronger selection relative to coding.)*
-3. **Independent Facet Offset Updates:** Update $\delta_{d,f}, \sigma_{d,f}, \sigma_{d,f,\text{fresh}}$ from pre-attempt snapshot. When `prescribed` is true, track `consecutiveMisses` (`implScore <= 0.40`), `recentStruggles`, `prescribedGradedCount`, and `lastPrescribedSlotKind`.
+3. **Independent Facet Offset Updates & Composite Streak (`F9`, `F16`):** Update $\delta_{d,f}, \sigma_{d,f}, \sigma_{d,f,\text{fresh}}$ from pre-attempt snapshot. When `prescribed` is true, compute order-independent weighted composites `lastPrescribedImplScore = ∑(w·s) / ∑w` and `lastPrescribedDifficulty = round(∑(w·D_eff) / ∑w)` across `implUpdates`, updating `consecutiveMisses` (`composite <= 0.40`), `missStreakConsumedByBreaker`, `recentStruggles`, `prescribedGradedCount`, and `lastPrescribedSlotKind`.
 
-### 2.4 Break / Rust Display, Rubric → Concept Mapping (`F10`) & Stability Ladder
+### 2.4 Break / Rust Display, Rubric → Concept Mapping (`F10`) & Stability Ladder (`D3`)
 
 1. **Rusty Badge & Display Rating:** Practiced domain shows **Rusty** at $\Delta t \ge 45$ idle calendar days; display deducts $0.85 \cdot \max(0, \sigma'(\Delta t) - \sigma_{d,f,\text{fresh}})$ (`26` pts after 120 idle days from $\sigma_{\text{fresh}} = 65$; $E$ always uses latent $\theta_{d,f}$).
 2. **Track B Rubric → Concept Outcome (`conceptOutcomeFromRubric`, `F10`):** Rows 2–3 → `"applied"`; optimal alternative route → `"probed-uncoached"` if unlearned else `"none"`; Rows 1, 4 (suboptimal), 5–7 → **`"lapsed"`** on `coached`/`applied` records (also pushed to `recentStruggles`), else `"probed-uncoached"`.
 3. **Stability Transitions ($R_c(\Delta t, S_c) = (1 + \Delta t / (9 S_c))^{-1}$):**
    - `probed-uncoached`: `state = "probed"`, $S_c = 0$, `probeCount += 1`, `lastEvaluatedAt = now`.
    - `coached`: First → `4d`; repeat on `coached` → **`S_c = min(prev.stabilityDays, 4)`**; on `applied` → **no-op on stability or clock**.
-   - `applied`: First → `14d` if previously `coached` with $\Delta t \ge 2\text{d}$ else `12d`. Subsequent → $S_c' = \min(730, S_c \cdot (1 + 2.2 \cdot (1 - R_c + 0.15) \cdot \min(1.5, \Delta t / S_c)))$: same-day cram `14.00 → 14.03d`; exact $R_c = 0.88$: `4 → 14 → 24 → 42 → 72 → 125d`; whole days: `4 → 14 → 25 → 43 → 76 → 131d`.
+   - `applied`: First → `14d` if previously `coached` with $\Delta t \ge 2\text{d} \land \neg \text{fromEasyReinforcement}$, else `12d`. Subsequent → **`S_c' = min(730, S_c * (1 + gainMult * 2.2 * (1 - R_c + 0.15) * min(1.5, dt / S_c)))`**, where **`gainMult = 0.5`** when `fromEasyReinforcement === true` (`D3`) and **`1.0`** otherwise (same-day cram `14.00 → 14.03d`; exact $R_c = 0.88$: `4 → 14 → 24 → 42 → 72 → 125d`; whole days: `4 → 14 → 25 → 43 → 76 → 131d`).
    - `lapsed`: **$S_c' = \min(S_c,\; 10,\; \max(2,\; 0.25 \cdot S_c))$**, `lapses += 1`, `lastEvaluatedAt = now` (`lastSuccessAt` unchanged). **`4d → 2d`** (due in `3` days), **`14d → 3.5d`**, **`120d → 10d`**.
 
 ---
@@ -167,15 +171,15 @@ Evaluated **top-to-bottom (first match wins)** per exercised domain ($\sum_d w_{
 | **Skip check-in** *(1-tap Familiarity, `F4`)* | `checkInSkippedAt = now`, `phase = "complete"`, `learningExit = "skipped"` | `pending` | `unsure` / `unsure` | **Allowed** |
 | Raw/Toolbar `"complete"` while `!isCheckInSettled` *(**`F2`**)* | **Rejected (HTTP 400)** | None | Unchanged | Blocked (`unsettled-checkin`) |
 
-**SQLite Schema, Drain Coordinator & Ledger Replay (`F1`, `F5`, `F6`, `F7`):**
-- `practice_launches` adds `rated INTEGER NOT NULL DEFAULT 1` (`0` for practice-only self-picked catalog attempts; `1` for prescribed attempts).
-- `skill_rating_events` enforces partial unique index `CREATE UNIQUE INDEX idx_skill_rating_events_attempt_graded ON skill_rating_events(attemptId) WHERE kind = 'attempt-graded'` plus `UNIQUE(idempotencyKey)` (`compensate:${attemptId}:${sourceRevision}`).
-- **`drainPendingRatingJobs(db)`:** Single-flight drain barrier run before `startPrescription`, draining `pending` / `running` / bounded-retry (`maxAutoRetries = 2`) `rating_jobs` strictly in **`launchSeq ASC`** order, falling back gracefully without blocking on provider outage.
-- **`replayRatingLedger(launches, events)`:**
-  - Folds launches in `launchSeq ASC` order; derives `prescribedCount` from `launch.prescribed` and `recentDomains` from all launches (`effective.primaryDomain ?? launch.provisionalDomain`), so both prescribed and practice-only launches apply light domain cooldowns and pending jobs advance Director slots immediately.
-  - Applies Track A updates (`applyAttemptGraded(..., { trackLaunchInReducer: false, prescribed: launch.prescribed })`) only when `launch.rated ?? launch.prescribed` is true; unrated (`rated = false`) self-picks still record `complexityCalibration` and positive Track B applications (`applied` / `coached`, no `lapsed` penalties).
-  - Replays concept transitions (attempt outcomes at `phaseRank = 0`, reflection coaching at `phaseRank = 1`, standalone concept events) strictly sorted by **`(occurredDay ASC, launchSeq ASC, phaseRank ASC, eventId ASC)`**.
-- **Snapshots & Reset (`F7`):** `LibraryImage`, `exportLibrary` ([`lib/store.ts:86`](../lib/store.ts)), and [`lib/snapshots.ts`](../lib/snapshots.ts) capture, replace, restore (`rating_jobs.status = 'running' → 'pending'`), and rollback `practice_launches`, `rating_jobs`, `skill_rating_events`, `director_preferences`, and `onboarding_state`.
+**SQLite Schema, Single-Flight Atomic Drain & Ledger Replay (`F1`, `F4`, `F5`, `F6`, `F7`, `F16`, `F17`):**
+- `practice_launches` persists at launch time with **`rated INTEGER NOT NULL DEFAULT 0`** (fail-closed: `0` for self-picks or manual timer edits beyond `±5m`; `1` for verified prescribed launches within `±5m`), `startedAt`, `language TEXT NOT NULL DEFAULT 'java'`, `difficultyScore`, `difficultyModifier`, `standardMinutes`, and `prescribedMinutes`. `catalog_problems` adds `signatureForced INTEGER NOT NULL DEFAULT 0`.
+- `rating_jobs` adds `claimOwnerId` and `claimExpiresAt`; `skill_rating_events` enforces partial unique index `CREATE UNIQUE INDEX idx_skill_rating_events_attempt_graded ON skill_rating_events(attemptId) WHERE kind = 'attempt-graded'` plus `UNIQUE(idempotencyKey)` (`compensate:${attemptId}:${sourceRevision}`).
+- **`drainPendingRatingJobs(db)` (`F4`):** `WeakMap` single-flight drain barrier run before `startPrescription`, atomically claiming `pending` / expired-lease / retryable jobs (`maxJobAttempts = 3`: 1 initial run + 2 retries) strictly in **`launchSeq ASC`** order, healing to `'complete'` if an `attempt-graded` row already exists before marking `'failed'`, and degrading gracefully without blocking on provider outage.
+- **`replayRatingLedger(launches, events)` (`F16`, `F17`):**
+  - Folds launches in `launchSeq ASC` order; derives `prescribedCount`, `prescribedRecentDomains` (rolling 6-attempt cap), `lastPrescribedSlotKind`, `lastPrescribedDifficulty`, and `missStreakConsumedByBreaker` strictly from persisted launches (`F16`), while deriving `lastPracticedDomain` (`prevDomain`-only immediate repeat avoidance) from all launches.
+  - Applies Track A updates (`applyAttemptGraded(..., { trackLaunchInReducer: false, prescribed: launch.prescribed })`) only when `launch.rated` is true; unrated (`rated = false`) self-picks skip **both** Track A ratings **and** Track B concepts (`F17`), retaining Check-In, `complexityCalibration`, Coach Memory, and `lastPracticedDomain`.
+  - Replays concept transitions (`attempt-graded` outcomes passing `fromEasyReinforcement: launch.intent?.slotKind === "easy-reinforcement"` at `phaseRank = 0`, reflection coaching at `phaseRank = 1`, standalone concept events) strictly sorted by **`(occurredDay ASC, launchSeq ASC, phaseRank ASC, eventId ASC)`**.
+- **Snapshots, Merge & Reset (`F7`):** `LibraryImage`, `exportLibrary` ([`lib/store.ts:92`](../lib/store.ts)), and [`lib/snapshots.ts`](../lib/snapshots.ts) capture, replace, restore (`rating_jobs.status = 'running' → 'pending'`), and rollback `practice_launches`, `rating_jobs`, `skill_rating_events`, `director_preferences`, and `onboarding_state`. `mergeRatingSnapshots` atomically re-indexes `launchSeq` sorted by `(startedAt, attemptId)` and remaps event `launchSeq`s collision-free.
 
 ### 3.2 Domain-Level Alternative-Route Guard (`evaluateMissedTargetSelection`, `F11`)
 Unused domain $d$ receives $S_{d,\text{sel}} = 0.20$ on a missed `selection` target **iff both**: (1) strictly worse asymptotic complexity than optimal (or timeout where $d$ passes), **AND** (2) targeted `targetConceptSlug` has `state ∈ {"coached", "applied"}`, **OR** (when omitted on `Growth`/`Breadth`/`Consolidation` Selection targets) **any Track B concept in `targetDomain`** has `state ∈ {"coached", "applied"}`.
@@ -188,32 +192,32 @@ Unused domain $d$ receives $S_{d,\text{sel}} = 0.20$ on a missed `selection` tar
 
 ## 4. Onboarding, Disguise Check & Normative Pacing Director
 
-### 4.1 Launch Provenance, Disguise Verification (`F8`) & Spoiler Guard
-- Verified `prescriptionId` flows through `Workspace.start` ([`components/workspace.tsx:753`](../components/workspace.tsx)) into `POST /api/state`, persisting `attempt.prescription = { id, intent, selectionSpoilerRevealed }`; self-picked catalog launches omit `prescriptionId` (`rated = false`).
-- On `targetFacet === "selection"`, candidates must pass both `isTitleDisguisedForTarget` and Planner `inspect_problem` verification of title, starter signature, and prompt text, with `p.evidence` hidden pre-start ([`components/problem-prescription.tsx:205-241`](../components/problem-prescription.tsx)) unless explicitly revealed (`selectionSpoilerRevealed: true` sets $w_{d,\text{sel}} = 0$).
+### 4.1 Launch Provenance, Disguise Verification (`F8`, `F13`, `F15`) & Spoiler Guard
+- Verified `prescriptionId` flows through `Workspace.start` ([`components/workspace.tsx:753`](../components/workspace.tsx)) into `POST /api/state`, resolved by `resolveLaunchPrescription` (honoring matching `<48h` prescriptions even across stale preference changes while returning HTTP `409` on `>= 48h` or slug/language mismatches); self-picked catalog launches omit `prescriptionId` (`rated = false`).
+- On `targetFacet === "selection"`, candidates must exclude `signatureForced` tags (`F13`) and pass both `isTitleDisguisedForTarget` and Planner `inspect_problem` verification (`java`/`cpp`), with `p.evidence` hidden pre-start ([`components/problem-prescription.tsx:205-241`](../components/problem-prescription.tsx)) unless explicitly revealed (`selectionSpoilerRevealed: true` sets $w_{d,\text{sel}} = 0$).
 
-### 4.2 Normative Pacing Director (`selectNextIntent`, `F12`, `D1`, v8)
-See [`PRESCRIPTION_AND_ONBOARDING_DESIGN.md`](./PRESCRIPTION_AND_ONBOARDING_DESIGN.md) for Planner schemas, timebox bands, onboarding seeds, and conversational steering tools. Director scheduling summary:
-1. **Stage 1 Adaptive Calibration (`prescribedCount < 4`):** `selectOnboardingIntent` starts from the learner's selected `StartingTier` band on Session #1 ($\mu_0 = 1000 \pm 220$), eases down to `easy-reinforcement` (`12–15m`) after any `score <= 0.40` miss, or steps up across `4` unmuted core domains (`graphs-search` Selection on #4 for high scorers).
-2. **Stage 2+ Eligibility, Mute Constraints & Cooldowns:** `validateDirectorPreferences` enforces `<= 3` `focusDomains`, disjoint `mutedDomains`, and `>= 4` Easy-backed domains unmuted. Exclude domains in `mutedDomains`, below `DOMAIN_MIN_GLOBAL_MU` (`backtracking >= 980`), matching `prevDomain`, or appearing `>= 2` times in the last `6` attempts (fallback relaxes 6-cap first, then `prevDomain`).
-3. **Reactive 2-Miss Circuit Breaker:** If `consecutiveMisses >= 2 && lastPrescribedSlotKind !== "easy-reinforcement"`, immediately preempt the slot with **`selectEasyReinforcementTarget`** (anti-loop rule prevents consecutive Easy Reinforcements).
-4. **Purposeful Easy Reinforcement Target Priority (`[θ - 210, θ - 135]`, `preferEasy: true`, `12–15m`, `implementation`):**
-   (1) Eligible domain with a struggle in last `14` days (`recentStruggles`) → (2) Fragile/near-due Track B concept ($R_c \le 0.92$ or $S_c < 14\text{d}$) → (3) Rusty domain → (4) Strongest domain (`implOffset DESC`).
+### 4.2 Normative Pacing Director (`selectNextIntent`, `F1`–`F17`, `D1`–`D3`, v9)
+See [`PRESCRIPTION_AND_ONBOARDING_DESIGN.md`](./PRESCRIPTION_AND_ONBOARDING_DESIGN.md) (v2) for Planner schemas, timebox bands, 48-seed table, and conversational steering tools. Director scheduling summary:
+1. **Stage 1 Adaptive Calibration (`prescribedCount < 4`):** `selectOnboardingIntent` defaults skipped Welcome tier to **`"foundations"`** ($\mu_0 = 1000 \pm 220$). After any `score <= 0.40` miss it drops to `easy-reinforcement` (`[max(800, μ₀ - 140), max(lo + 40, μ₀ - 65)]`, `ability` clock if `< 950`); partial (`0.40 < s < 0.80`) holds `[max(800, μ₀ - 45), max(lo + 30, μ₀ + 10)]`; clean solves (`>= 0.80`) step up from **`anchor = Math.max(μ₀, lastPrescribedDifficulty)`** (`[anchor + 55, anchor + 145]`, enabling `graphs-search` Selection on #4 if `anchor >= 1120 && disguisableCounts >= 5`). Calibration reveal formats `μ₀ ± σ₀`.
+2. **Stage 2+ Eligibility, Mute Constraints & Cooldowns (`F17`):** `validateDirectorPreferences` enforces `<= 3` `focusDomains`, disjoint `mutedDomains`, and `>= 4` Easy-backed domains unmuted. Exclude domains in `mutedDomains`, below `DOMAIN_MIN_GLOBAL_MU` (`backtracking >= 980`), matching `prevDomain` (`lastPracticedDomain`, including self-picks), or appearing `>= 2` times in the last `6` **prescribed** attempts (`prescribedRecentDomains`; fallback relaxes 6-cap first, then `prevDomain`).
+3. **Reactive 2-Miss Circuit Breaker (`F16`):** If `consecutiveMisses >= 2 && !missStreakConsumedByBreaker && lastPrescribedSlotKind !== "easy-reinforcement"`, preempt once per miss streak with **`selectEasyReinforcementTarget`** (`lastPrescribedSlotKind` and `missStreakConsumedByBreaker` tracked from `practice_launches` so outages cannot loop).
+4. **Purposeful Easy Reinforcement Target Priority (`[θ - 210, θ - 135]`, `preferEasy: true`, `implementation`):**
+   (1) Eligible domain with a struggle in last `14` days (`recentStruggles`) → (2) Fragile/near-due Track B concept ($R_c \le 0.92$ or $S_c < 14\text{d}$) → (3) Rusty domain → (4) Strongest domain (`implOffset DESC`). Scales clock via `standardMinutes(D)` (`~25m` on `1180` Mediums at `1350`); below `θ = 950` (or `backtracking < 1060`) uses `clockGoal = "ability"` (`+50%` clock, `ΔD_time ≈ -30`) + `allowCoachedRevisit = true` (`status = 'ac'` coached `>= 5d` old when fresh `< 3`).
 5. **5-Slot Schedule (`slotIndex = prescribedCount % 5`, ties broken by canonical domain index):**
    - **Consolidation (Slot `3`, or Slot `2` overflow when `dueConcepts.length >= 2`):** Top due concept ($R_c \le 0.88$, sorted by `R ASC, stabilityDays ASC, order ASC`) at `[-40, +5]`, or Rusty fallback on Slot `3`.
    - **Slot `1` Probe / Breadth (or Slot `3` fallback if `any(implSigma > 95)`):** Slot `1` with `fragileCount < MAX_FRAGILE_CONCEPTS (4)` probes first canonical eligible `CONCEPT_CATALOGUE` entry at `[-55, -15]`; otherwise `Breadth` picks max `implSigma` at `[-45, +10]`.
-   - **Slot `4` Proactive Easy Reinforcement:** Calls `selectEasyReinforcementTarget` (unless previous slot was already `easy-reinforcement`).
-   - **Default (Slot `0`, `2`, or `3/4` fallback) Growth:** Minimizes `min(implOffset - 0.6*implSigma, selOffset - 0.6*selSigma) - (isFocused ? 35 : 0)` at `[-45, +10]`, setting `targetFacet = "selection"` iff `implOffset - selOffset >= 35 || implAttempts % 3 === 2`.
-6. **Planner Tolerance & Skips:** `evidenceIds: []` permitted at [`lib/prescription.ts:463`](../lib/prescription.ts) whenever `intent` is set; `"Choose another"` retains intent for skips `1–2` and rotates domain on skip `3`; `adjustPrescriptionIntent` supports interactive coach steering.
+   - **Slot `4` Proactive Easy Reinforcement:** Calls `selectEasyReinforcementTarget` (unless previous prescribed slot was `easy-reinforcement`).
+   - **Default (Slot `0`, `2`, or `3/4` fallback) Growth (`D2`, `F13`):** **Slot 0** is dedicated to eligible pinned `focusDomains` (`Slot 2` stays true lowest-LCB across all eligible domains), minimizing `lcb(d)` where `lcb(d) = implOffset - 0.6*implSigma` if `disguisableCounts[d] < 5` else `min(implOffset - 0.6*implSigma, selOffset - 0.6*selSigma)` at `[-45, +10]`. `chooseTargetFacet` picks `"selection"` only when `disguisableCounts[d] >= 5 && (implOffset - selOffset >= 35 || (slot === "growth" && implAttempts % 3 === 2))`.
+6. **Planner Tolerance & Skips:** `evidenceIds: []` permitted at [`lib/prescription.ts:497`](../lib/prescription.ts) whenever `intent` is set; `"Choose another"` retains intent for skips `1–2` and rotates domain on skip `3` (`selectSkipOutcome`); `adjustPrescriptionIntent` supports interactive coach steering.
 
 ---
 
 ## 5. Machine-Asserted Verification & 200-Seed Recovery Results
 
-Every value below is strictly asserted in [`tests/skill-ratings-sim.test.ts`](../tests/skill-ratings-sim.test.ts) (`16/16` tests passing):
+Every value below is strictly asserted in [`tests/skill-ratings-sim.test.ts`](../tests/skill-ratings-sim.test.ts) (`16/16` suites passing):
 
 1. **Onboarding & Calibration:**
-   - Weak (`4 × 0.0` @ `D = 920`) drops $\mu_0$ to **`738.14`**; Stage-2 Director skips `backtracking`, clamps `band[0] = 800`, and rotates domains. Clean Easies move `1000 ± 220` to **`1167 ± 146`**.
+   - Weak (`4 × 0.0` @ `D = 920`) drops $\mu_0$ to **`738.14`**; Stage-2 Director skips `backtracking`, clamps `band[0] = 800`, and rotates domains. Clean Easies (`4 × 1.0` @ `D = 920`) move `1000 ± 220` to **`1167 ± 146`**.
    - Starting tiers keep initial prior at `1000 ± 220`; `isRatingRevealed` stays `false` for `0..3` graded prescribed solves and flips `true` at `4`.
 2. **Hand-Attributed 11-Session Fixture Replay (22–26 Oct + 19 Nov, strictly §2.3 rubric scores, `prescribedCount = 0`):**
    - **Global Base:** **`1077 ± 112`** (`graphs-search: 1121 ± 107`, `binary-search: 1116 ± 106`, `hashing-prefix: 1088 ± 107`, `two-pointers-window: 1087 ± 108`, `sorting-intervals: 1084 ± 108`, `heaps-ordered: 1059 ± 109`, `stacks-queues-linked: 1055 ± 108` — all *Provisional* while $\sigma > 80$).
@@ -223,10 +227,10 @@ Every value below is strictly asserted in [`tests/skill-ratings-sim.test.ts`](..
      3. `Slot 2 [consolidation]`: `binary-search` (`implementation`, `binary-search-index`) @ `1076–1121`
      4. `Slot 3 [consolidation]`: `hashing-prefix` (`implementation`, `prefix-sum-map`) @ `1048–1093`
      5. `Slot 4 [easy-reinforcement]`: `sorting-intervals` (`implementation`, `custom-comparator-intervals`, `preferEasy`) @ `874–949`
-3. **Deterministic 200-Seed 365-Day v8 Recovery, Real Lapses, Failure-Streak Guard & Concept Pace (`0` cooldown violations across 219,000 simulated days):**
+3. **Deterministic 200-Seed 365-Day v9 End-to-End Simulation (`selectNextIntent` + `ΔD_time` + `0.5×` D3 credit across 219,000 simulated days):**
 
-| Learner (`trueBase`) | 90d Global MAE | Mean `graphs − dp` Gap `(90d → 180d → 365d)` | `dp > graphs` Inversions `(90d → 180d → 365d)` | Mean Lapses / 365d | `3+`-Miss Streaks / 365d | Concepts Introduced `(90d → 180d → 365d)` | `30+d` Stable `(90d → 180d → 365d)` |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Beginner (`900`)** | `34.0` pts | `65.8 → 100.2 → 138.9` | `17.0% → 9.5% → 2.0%` | `70.0` | `35.87` | `9.1 → 11.9 → 13.7` | `0.8 → 3.2 → 6.5` |
-| **Intermediate (`1150`)** | `26.6` pts | `56.7 → 101.3 → 133.6` | `23.0% → 10.0% → 1.5%` | `64.1` | `17.77` | `12.3 → 17.0 → 21.0` | `0.9 → 5.0 → 11.1` |
-| **Strong (`1350`)** | `25.5` pts | `58.6 → 94.6 → 133.1` | `17.0% → 7.0% → 1.0%` | `63.5` | `16.59` | `12.4 → 17.1 → 20.9` | `1.1 → 5.0 → 11.1` |
+| Learner (`trueBase`) | 90d MAE | `graphs − dp` Gap `(90d → 180d → 365d)` | `dp > graphs` Inv `(90d → 180d → 365d)` | Sel / 90d | Lapses / 365d | `3+`-Miss Streaks / 365d | Intro `(90d → 180d → 365d)` | `30+d` Stable `(90d → 180d → 365d)` | Graphs `σ` 180d |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Beginner (`900`)** | `34.8` | `47.1 → 89.6 → 123.2` | `25.5% → 10.5% → 3.0%` | `13.1` | `66.6` | `30.54` | `9.2 → 11.9 → 13.7` | `0.8 → 3.2 → 6.3` | `83.2` |
+| **Intermediate (`1150`)** | `25.6` | `63.1 → 102.8 → 131.4` | `18.5% → 7.0% → 2.0%` | `15.3` | `63.0` | `17.23` | `11.9 → 16.7 → 20.7` | `0.9 → 4.4 → 10.8` | `82.0` |
+| **Strong (`1350`)** | `24.5` | `69.7 → 102.4 → 131.3` | `12.5% → 9.0% → 3.0%` | `17.9` | `63.5` | `17.11` | `12.1 → 16.8 → 20.9` | `0.9 → 4.5 → 10.7` | `82.4` |

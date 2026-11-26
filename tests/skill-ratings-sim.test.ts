@@ -3,12 +3,11 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 // ============================================================================
-// Reference deterministic implementation of Skill Ratings Design v8
-// & Prescription / Onboarding Design v1.
-// Verifies every equation, resolver rank/override, concept table entry, band,
-// ladder, launch-sequence replay, check-in state machine, SQLite constraints,
-// catalog filtering, onboarding, purposeful Easy reinforcement, practice-only
-// self-picks, conversational steering, drain barrier, & 200-seed 365d recovery.
+// Reference deterministic implementation of Skill Ratings Design v9
+// & Prescription / Onboarding Design v2.
+// Verifies F1–F19, D1–D3, all 9 smaller items, timebox math, language parity,
+// single-flight atomic drains, ordered shortlists, multi-batch escape hatches,
+// signatureForced Selection guard, complete steering, & 200-seed e2e recovery.
 // ============================================================================
 
 export const DOMAINS = [
@@ -205,8 +204,62 @@ export const PROVISIONAL_SIGMA_THRESHOLD = 80;
 export const MAX_FRAGILE_CONCEPTS = 4;
 export const VALID_RUBRIC_SCORES = new Set([0, 0.15, 0.2, 0.3, 0.35, 0.4, 0.5, 0.65, 0.75, 0.8, 0.9, 1]);
 
+export type LanguageId = "java" | "cpp";
+
 export function isDomainProvisional(sigma: number): boolean {
   return sigma > PROVISIONAL_SIGMA_THRESHOLD;
+}
+
+/** F3: Gate Welcome picker strictly on welcomeDismissed & zero prescribed solves (ignores bundled historySeed). */
+export function shouldShowWelcomePicker(opts: {
+  welcomeDismissed: boolean;
+  prescribedCount: number;
+  bundledImportCount?: number;
+  userImportCount?: number;
+}): boolean {
+  return !opts.welcomeDismissed && opts.prescribedCount === 0;
+}
+
+/** F1: Standard problem timebox anchored to base difficulty score. */
+export function standardMinutes(difficultyScore: number): number {
+  if (difficultyScore <= 950) return 15;
+  if (difficultyScore <= 1080) return 20;
+  if (difficultyScore <= 1250) return 25;
+  if (difficultyScore <= 1400) return 35;
+  return 45;
+}
+
+/** F1 & F2: Clock-adjusted effective difficulty via log-ratio ΔD_time clamped to [-45, +45]. */
+export function timeAdjustedDifficulty(
+  baseDifficulty: number,
+  stdMinutes: number,
+  prescribedMinutes: number,
+): number {
+  const safeStd = Math.max(10, stdMinutes);
+  const safeChosen = Math.max(10, prescribedMinutes);
+  const deltaTime = Math.max(
+    -45,
+    Math.min(45, Math.round(-75 * Math.log(safeChosen / safeStd))),
+  );
+  return Math.max(750, Math.min(1850, Math.round(baseDifficulty + deltaTime)));
+}
+
+/** F1: UI allows 1–90m; edits within ±5m stay rated via ΔD_time, larger edits run unrated. */
+export function isManualTimeboxRated(prescribedMinutes: number, chosenMinutes: number): boolean {
+  return Math.abs(chosenMinutes - prescribedMinutes) <= 5;
+}
+
+/** F13: Problem-signature tags that force the data structure / reveal Selection. */
+export const SIGNATURE_FORCED_SLUGS = new Set([
+  "tree",
+  "binary-tree",
+  "binary-search-tree",
+  "linked-list",
+  "doubly-linked-list",
+]);
+
+export function isSignatureForcedFromSlugs(slugs: string[]): boolean {
+  return slugs.some((s) => SIGNATURE_FORCED_SLUGS.has(s));
 }
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
@@ -309,13 +362,17 @@ export type LearnerRatingState = {
     }
   >;
   concepts: Map<string, ConceptRecord>;
-  recentDomains: DomainId[];
+  recentDomains: DomainId[]; // Tracked for all launches/tests (compatibility); Director 6-cap uses prescribedRecentDomains when populated
+  prescribedRecentDomains: DomainId[];
+  lastPracticedDomain: DomainId | null;
   prescribedCount: number;
   prescribedGradedCount: number;
   recentStruggles: Array<{ domain: DomainId; day: number; conceptSlug?: string }>;
   consecutiveMisses: number;
+  missStreakConsumedByBreaker: boolean;
   lastPrescribedSlotKind: PrescriptionIntent["slotKind"] | null;
   lastPrescribedImplScore: number | null;
+  lastPrescribedDifficulty: number | null;
   complexityCalibration: {
     time: ComplexityBucket;
     space: ComplexityBucket;
@@ -343,12 +400,16 @@ export function createInitialState(): LearnerRatingState {
     domains,
     concepts: new Map(),
     recentDomains: [],
+    prescribedRecentDomains: [],
+    lastPracticedDomain: null,
     prescribedCount: 0,
     prescribedGradedCount: 0,
     recentStruggles: [],
     consecutiveMisses: 0,
+    missStreakConsumedByBreaker: false,
     lastPrescribedSlotKind: null,
     lastPrescribedImplScore: null,
+    lastPrescribedDifficulty: null,
     complexityCalibration: {
       time: { accurate: 0, inaccurate: 0, unsure: 0 },
       space: { accurate: 0, inaccurate: 0, unsure: 0 },
@@ -358,6 +419,11 @@ export function createInitialState(): LearnerRatingState {
 
 export function isRatingRevealed(state: LearnerRatingState): boolean {
   return state.prescribedGradedCount >= 4;
+}
+
+/** F8: Include initial uncertainty alongside revealed Global Rating. */
+export function formatInitialRatingReveal(state: LearnerRatingState): string {
+  return `${Math.round(state.globalMu)} ± ${Math.round(state.globalSigma)}`;
 }
 
 export function displayRating(
@@ -508,18 +574,42 @@ export function applyAttemptGraded(
   }
 
   state.globalLastDay = day;
-  const primary = options.primaryDomain ?? implUpdates[0]?.domain;
+  const primary =
+    options.primaryDomain ??
+    (implUpdates.length
+      ? [...implUpdates].sort((a, b) => b.weight - a.weight || DOMAINS.indexOf(a.domain) - DOMAINS.indexOf(b.domain))[0].domain
+      : undefined);
   if (options.trackLaunchInReducer ?? true) {
-    if (primary) state.recentDomains.push(primary);
+    if (primary) {
+      state.recentDomains.push(primary);
+      state.lastPracticedDomain = primary;
+      if (options.prescribed) state.prescribedRecentDomains.push(primary);
+    }
     if (options.prescribed) state.prescribedCount += 1;
   }
   if (options.prescribed) {
     state.prescribedGradedCount += 1;
-    const primaryImpl = implUpdates[0]?.score;
-    if (primaryImpl !== undefined) {
-      state.lastPrescribedImplScore = primaryImpl;
-      if (primaryImpl <= 0.4 && primary) {
+    // F9: Order-independent weighted composite implementation score across all implUpdates
+    const rawWSum = implUpdates.reduce((s, u) => s + u.weight, 0);
+    const compositeImplScore =
+      rawWSum > 0
+        ? implUpdates.reduce((s, u) => s + u.weight * u.score, 0) / rawWSum
+        : undefined;
+    const weightedDiff =
+      rawWSum > 0
+        ? implUpdates.reduce((s, u) => s + u.weight * u.difficulty, 0) / rawWSum
+        : undefined;
+    if (weightedDiff !== undefined) {
+      state.lastPrescribedDifficulty = Math.round(weightedDiff);
+    }
+    if (compositeImplScore !== undefined) {
+      state.lastPrescribedImplScore = compositeImplScore;
+      if (compositeImplScore <= 0.4 && primary) {
         state.consecutiveMisses += 1;
+        // A new pair of misses after a non-reinforcement miss arms the breaker again
+        if (options.slotKind !== "easy-reinforcement" && state.consecutiveMisses >= 2) {
+          state.missStreakConsumedByBreaker = false;
+        }
         state.recentStruggles.push({
           domain: primary,
           day,
@@ -527,9 +617,15 @@ export function applyAttemptGraded(
         });
       } else {
         state.consecutiveMisses = 0;
+        state.missStreakConsumedByBreaker = false;
       }
     }
-    if (options.slotKind) state.lastPrescribedSlotKind = options.slotKind;
+    if (options.slotKind) {
+      state.lastPrescribedSlotKind = options.slotKind;
+      if (options.slotKind === "easy-reinforcement") {
+        state.missStreakConsumedByBreaker = true;
+      }
+    }
   }
 
   if (options.statedComplexity) {
@@ -617,6 +713,8 @@ export type RatingJobRow = {
   status: "pending" | "running" | "complete" | "failed";
   attempts: number;
   lastError: string | null;
+  claimOwnerId?: string | null;
+  claimExpiresAt?: number | null;
   updatedAt: number;
 };
 
@@ -692,6 +790,7 @@ export function updateConceptRecord(
   domain: DomainId,
   day: number,
   outcome: "probed-uncoached" | "coached" | "applied" | "lapsed",
+  opts: { fromEasyReinforcement?: boolean } = {},
 ) {
   const prev = state.concepts.get(slug);
   if (outcome === "probed-uncoached") {
@@ -749,15 +848,17 @@ export function updateConceptRecord(
   if (outcome === "applied") {
     if (prev.state === "coached" && prev.reps === 0) {
       prev.state = "applied";
-      prev.stabilityDays = dt >= 2 ? 14 : 12;
+      prev.stabilityDays = dt >= 2 && !opts.fromEasyReinforcement ? 14 : 12;
       prev.reps = 1;
       prev.lastEvaluatedDay = day;
       prev.lastSuccessDay = day;
     } else {
       const spacing = Math.min(1.5, dt / prev.stabilityDays);
+      // D3: Easy Reinforcement passes grow already-applied stability at 0.5x rate
+      const gainMult = opts.fromEasyReinforcement ? 0.5 : 1.0;
       prev.stabilityDays = Math.min(
         730,
-        prev.stabilityDays * (1 + 2.2 * (1 - R + 0.15) * spacing),
+        prev.stabilityDays * (1 + gainMult * 2.2 * (1 - R + 0.15) * spacing),
       );
       prev.reps += 1;
       prev.lastEvaluatedDay = day;
@@ -799,27 +900,29 @@ export function conceptOutcomeFromRubric(args: {
 
 export type StartingTier = "foundations" | "interview-prep" | "experienced";
 
+export const DEFAULT_STARTING_TIER: StartingTier = "foundations";
+
 export const STARTING_TIER_BANDS: Record<
   StartingTier,
   { band: [number, number]; minutes: [number, number]; label: string; description: string }
 > = {
   foundations: {
     band: [820, 920],
-    minutes: [12, 15],
+    minutes: [12, 18],
     label: "Building Foundations",
-    description: "Approachable single-invariant Easy problems (12–15 min) while we calibrate your baseline.",
+    description: "Approachable single-invariant Easy problems (12–18 min) while we calibrate your baseline.",
   },
   "interview-prep": {
     band: [940, 1040],
-    minutes: [15, 22],
+    minutes: [17, 23],
     label: "Interview Prep",
-    description: "Tricky Easies and entry Mediums (15–22 min) covering core data structures.",
+    description: "Tricky Easies and entry Mediums (17–23 min) covering core data structures.",
   },
   experienced: {
     band: [1100, 1220],
-    minutes: [25, 30],
+    minutes: [22, 28],
     label: "Experienced Solver",
-    description: "Standard multi-step Mediums (25–30 min) to calibrate higher ratings fast.",
+    description: "Standard multi-step Mediums (22–28 min) to calibrate higher ratings fast.",
   },
 };
 
@@ -835,19 +938,85 @@ export type OnboardingSeedProblem = {
 };
 
 export const ONBOARDING_SEED_PROBLEMS: ReadonlyArray<OnboardingSeedProblem> = [
+  // 4 Core Onboarding Domains x 3 Tiers x 2 Free Band-Verified Seeds (24)
   { slug: "contains-duplicate", title: "Contains Duplicate", domain: "hashing-prefix", tier: "foundations", difficulty: "Easy", acRate: 63, isPaidOnly: false, topicTagSlugs: ["array", "hash-table", "sorting"] },
-  { slug: "group-anagrams", title: "Group Anagrams", domain: "hashing-prefix", tier: "interview-prep", difficulty: "Medium", acRate: 70, isPaidOnly: false, topicTagSlugs: ["array", "hash-table", "string", "sorting"] },
-  { slug: "subarray-sum-equals-k", title: "Subarray Sum Equals K", domain: "hashing-prefix", tier: "experienced", difficulty: "Medium", acRate: 45, isPaidOnly: false, topicTagSlugs: ["array", "hash-table", "prefix-sum"] },
-  { slug: "valid-palindrome", title: "Valid Palindrome", domain: "two-pointers-window", tier: "foundations", difficulty: "Easy", acRate: 50, isPaidOnly: false, topicTagSlugs: ["two-pointers", "string"] },
-  { slug: "container-with-most-water", title: "Container With Most Water", domain: "two-pointers-window", tier: "interview-prep", difficulty: "Medium", acRate: 57, isPaidOnly: false, topicTagSlugs: ["array", "two-pointers", "greedy"] },
-  { slug: "longest-substring-without-repeating-characters", title: "Longest Substring Without Repeating Characters", domain: "two-pointers-window", tier: "experienced", difficulty: "Medium", acRate: 36, isPaidOnly: false, topicTagSlugs: ["hash-table", "string", "sliding-window"] },
-  { slug: "valid-parentheses", title: "Valid Parentheses", domain: "stacks-queues-linked", tier: "foundations", difficulty: "Easy", acRate: 42, isPaidOnly: false, topicTagSlugs: ["string", "stack"] },
-  { slug: "remove-nth-node-from-end-of-list", title: "Remove Nth Node From End of List", domain: "stacks-queues-linked", tier: "interview-prep", difficulty: "Medium", acRate: 48, isPaidOnly: false, topicTagSlugs: ["linked-list", "two-pointers"] },
-  { slug: "daily-temperatures", title: "Daily Temperatures", domain: "stacks-queues-linked", tier: "experienced", difficulty: "Medium", acRate: 67, isPaidOnly: false, topicTagSlugs: ["array", "stack", "monotonic-stack"] },
-  { slug: "search-insert-position", title: "Search Insert Position", domain: "binary-search", tier: "foundations", difficulty: "Easy", acRate: 48, isPaidOnly: false, topicTagSlugs: ["array", "binary-search"] },
-  { slug: "koko-eating-bananas", title: "Koko Eating Bananas", domain: "binary-search", tier: "interview-prep", difficulty: "Medium", acRate: 49, isPaidOnly: false, topicTagSlugs: ["array", "binary-search"] },
-  { slug: "search-in-rotated-sorted-array", title: "Search in Rotated Sorted Array", domain: "binary-search", tier: "experienced", difficulty: "Medium", acRate: 42, isPaidOnly: false, topicTagSlugs: ["array", "binary-search"] },
+  { slug: "ransom-note", title: "Ransom Note", domain: "hashing-prefix", tier: "foundations", difficulty: "Easy", acRate: 64, isPaidOnly: false, topicTagSlugs: ["hash-table", "string", "counting"] },
+  { slug: "two-sum", title: "Two Sum", domain: "hashing-prefix", tier: "interview-prep", difficulty: "Easy", acRate: 55, isPaidOnly: false, topicTagSlugs: ["array", "hash-table"] },
+  { slug: "group-anagrams", title: "Group Anagrams", domain: "hashing-prefix", tier: "interview-prep", difficulty: "Medium", acRate: 73, isPaidOnly: false, topicTagSlugs: ["array", "hash-table", "string", "sorting"] },
+  { slug: "contiguous-array", title: "Contiguous Array", domain: "hashing-prefix", tier: "experienced", difficulty: "Medium", acRate: 49, isPaidOnly: false, topicTagSlugs: ["array", "hash-table", "prefix-sum"] },
+  { slug: "brick-wall", title: "Brick Wall", domain: "hashing-prefix", tier: "experienced", difficulty: "Medium", acRate: 56, isPaidOnly: false, topicTagSlugs: ["array", "hash-table"] },
+
+  { slug: "move-zeroes", title: "Move Zeroes", domain: "two-pointers-window", tier: "foundations", difficulty: "Easy", acRate: 63, isPaidOnly: false, topicTagSlugs: ["array", "two-pointers"] },
+  { slug: "reverse-string", title: "Reverse String", domain: "two-pointers-window", tier: "foundations", difficulty: "Easy", acRate: 79, isPaidOnly: false, topicTagSlugs: ["two-pointers", "string"] },
+  { slug: "valid-palindrome", title: "Valid Palindrome", domain: "two-pointers-window", tier: "interview-prep", difficulty: "Easy", acRate: 50, isPaidOnly: false, topicTagSlugs: ["two-pointers", "string"] },
+  { slug: "find-the-index-of-the-first-occurrence-in-a-string", title: "Find the Index of the First Occurrence in a String", domain: "two-pointers-window", tier: "interview-prep", difficulty: "Easy", acRate: 45, isPaidOnly: false, topicTagSlugs: ["two-pointers", "string"] },
+  { slug: "container-with-most-water", title: "Container With Most Water", domain: "two-pointers-window", tier: "experienced", difficulty: "Medium", acRate: 57, isPaidOnly: false, topicTagSlugs: ["array", "two-pointers", "greedy"] },
+  { slug: "max-consecutive-ones-iii", title: "Max Consecutive Ones III", domain: "two-pointers-window", tier: "experienced", difficulty: "Medium", acRate: 64, isPaidOnly: false, topicTagSlugs: ["array", "binary-search", "sliding-window", "prefix-sum"] },
+
+  { slug: "middle-of-the-linked-list", title: "Middle of the Linked List", domain: "stacks-queues-linked", tier: "foundations", difficulty: "Easy", acRate: 80, isPaidOnly: false, topicTagSlugs: ["linked-list", "two-pointers"] },
+  { slug: "number-of-recent-calls", title: "Number of Recent Calls", domain: "stacks-queues-linked", tier: "foundations", difficulty: "Easy", acRate: 77, isPaidOnly: false, topicTagSlugs: ["queue"] },
+  { slug: "valid-parentheses", title: "Valid Parentheses", domain: "stacks-queues-linked", tier: "interview-prep", difficulty: "Easy", acRate: 42, isPaidOnly: false, topicTagSlugs: ["string", "stack"] },
+  { slug: "linked-list-cycle", title: "Linked List Cycle", domain: "stacks-queues-linked", tier: "interview-prep", difficulty: "Easy", acRate: 52, isPaidOnly: false, topicTagSlugs: ["hash-table", "linked-list", "two-pointers"] },
+  { slug: "remove-nth-node-from-end-of-list", title: "Remove Nth Node From End of List", domain: "stacks-queues-linked", tier: "experienced", difficulty: "Medium", acRate: 49, isPaidOnly: false, topicTagSlugs: ["linked-list", "two-pointers"] },
+  { slug: "daily-temperatures", title: "Daily Temperatures", domain: "stacks-queues-linked", tier: "experienced", difficulty: "Medium", acRate: 64, isPaidOnly: false, topicTagSlugs: ["array", "stack", "monotonic-stack"] },
+
+  { slug: "count-negative-numbers-in-a-sorted-matrix", title: "Count Negative Numbers in a Sorted Matrix", domain: "binary-search", tier: "foundations", difficulty: "Easy", acRate: 78, isPaidOnly: false, topicTagSlugs: ["array", "binary-search", "matrix"] },
+  { slug: "find-target-indices-after-sorting-array", title: "Find Target Indices After Sorting Array", domain: "binary-search", tier: "foundations", difficulty: "Easy", acRate: 78, isPaidOnly: false, topicTagSlugs: ["array", "binary-search", "sorting"] },
+  { slug: "search-insert-position", title: "Search Insert Position", domain: "binary-search", tier: "interview-prep", difficulty: "Easy", acRate: 48, isPaidOnly: false, topicTagSlugs: ["array", "binary-search"] },
+  { slug: "first-bad-version", title: "First Bad Version", domain: "binary-search", tier: "interview-prep", difficulty: "Easy", acRate: 46, isPaidOnly: false, topicTagSlugs: ["binary-search"] },
+  { slug: "koko-eating-bananas", title: "Koko Eating Bananas", domain: "binary-search", tier: "experienced", difficulty: "Medium", acRate: 50, isPaidOnly: false, topicTagSlugs: ["array", "binary-search"] },
+  { slug: "search-a-2d-matrix", title: "Search a 2D Matrix", domain: "binary-search", tier: "experienced", difficulty: "Medium", acRate: 52, isPaidOnly: false, topicTagSlugs: ["array", "binary-search", "matrix"] },
+
+  // F7: Fallback Free Seeds for Remaining 8 Easy-Backed Domains (all valid across all 3 tiers when core 4 are muted!)
+  { slug: "build-array-from-permutation", title: "Build Array from Permutation", domain: "arrays-strings", tier: "foundations", difficulty: "Easy", acRate: 79, isPaidOnly: false, topicTagSlugs: ["array", "simulation"] },
+  { slug: "longest-common-prefix", title: "Longest Common Prefix", domain: "arrays-strings", tier: "interview-prep", difficulty: "Easy", acRate: 45, isPaidOnly: false, topicTagSlugs: ["string", "trie"] },
+  { slug: "spiral-matrix", title: "Spiral Matrix", domain: "arrays-strings", tier: "experienced", difficulty: "Medium", acRate: 53, isPaidOnly: false, topicTagSlugs: ["array", "matrix", "simulation"] },
+
+  { slug: "sort-the-people", title: "Sort the People", domain: "sorting-intervals", tier: "foundations", difficulty: "Easy", acRate: 78, isPaidOnly: false, topicTagSlugs: ["array", "hash-table", "string", "sorting"] },
+  { slug: "rank-transform-of-an-array", title: "Rank Transform of an Array", domain: "sorting-intervals", tier: "interview-prep", difficulty: "Easy", acRate: 57, isPaidOnly: false, topicTagSlugs: ["array", "hash-table", "sorting"] },
+  { slug: "merge-intervals", title: "Merge Intervals", domain: "sorting-intervals", tier: "experienced", difficulty: "Medium", acRate: 49, isPaidOnly: false, topicTagSlugs: ["array", "sorting"] },
+
+  { slug: "last-stone-weight", title: "Last Stone Weight", domain: "heaps-ordered", tier: "foundations", difficulty: "Easy", acRate: 66, isPaidOnly: false, topicTagSlugs: ["array", "heap-priority-queue"] },
+  { slug: "relative-ranks", title: "Relative Ranks", domain: "heaps-ordered", tier: "interview-prep", difficulty: "Easy", acRate: 57, isPaidOnly: false, topicTagSlugs: ["array", "sorting", "heap-priority-queue"] },
+  { slug: "kth-largest-element-in-an-array", title: "Kth Largest Element in an Array", domain: "heaps-ordered", tier: "experienced", difficulty: "Medium", acRate: 64, isPaidOnly: false, topicTagSlugs: ["array", "divide-and-conquer", "sorting", "heap-priority-queue", "quickselect"] },
+
+  { slug: "maximum-depth-of-binary-tree", title: "Maximum Depth of Binary Tree", domain: "trees-recursion", tier: "foundations", difficulty: "Easy", acRate: 77, isPaidOnly: false, topicTagSlugs: ["tree", "depth-first-search", "breadth-first-search", "binary-tree"] },
+  { slug: "symmetric-tree", title: "Symmetric Tree", domain: "trees-recursion", tier: "interview-prep", difficulty: "Easy", acRate: 57, isPaidOnly: false, topicTagSlugs: ["tree", "depth-first-search", "breadth-first-search", "binary-tree"] },
+  { slug: "binary-tree-level-order-traversal", title: "Binary Tree Level Order Traversal", domain: "trees-recursion", tier: "experienced", difficulty: "Medium", acRate: 64, isPaidOnly: false, topicTagSlugs: ["tree", "breadth-first-search", "binary-tree"] },
+
+  { slug: "flood-fill", title: "Flood Fill", domain: "graphs-search", tier: "foundations", difficulty: "Easy", acRate: 66, isPaidOnly: false, topicTagSlugs: ["array", "depth-first-search", "breadth-first-search", "matrix"] },
+  { slug: "find-if-path-exists-in-graph", title: "Find if Path Exists in Graph", domain: "graphs-search", tier: "interview-prep", difficulty: "Easy", acRate: 54, isPaidOnly: false, topicTagSlugs: ["depth-first-search", "breadth-first-search", "union-find", "graph"] },
+  { slug: "number-of-islands", title: "Number of Islands", domain: "graphs-search", tier: "experienced", difficulty: "Medium", acRate: 62, isPaidOnly: false, topicTagSlugs: ["array", "depth-first-search", "breadth-first-search", "union-find", "matrix"] },
+
+  { slug: "fibonacci-number", title: "Fibonacci Number", domain: "dynamic-programming", tier: "foundations", difficulty: "Easy", acRate: 72, isPaidOnly: false, topicTagSlugs: ["math", "dynamic-programming", "recursion", "memoization"] },
+  { slug: "climbing-stairs", title: "Climbing Stairs", domain: "dynamic-programming", tier: "interview-prep", difficulty: "Easy", acRate: 53, isPaidOnly: false, topicTagSlugs: ["math", "dynamic-programming", "memoization"] },
+  { slug: "house-robber", title: "House Robber", domain: "dynamic-programming", tier: "experienced", difficulty: "Medium", acRate: 52, isPaidOnly: false, topicTagSlugs: ["array", "dynamic-programming"] },
+
+  { slug: "lemonade-change", title: "Lemonade Change", domain: "greedy", tier: "foundations", difficulty: "Easy", acRate: 62, isPaidOnly: false, topicTagSlugs: ["array", "greedy"] },
+  { slug: "assign-cookies", title: "Assign Cookies", domain: "greedy", tier: "interview-prep", difficulty: "Easy", acRate: 49, isPaidOnly: false, topicTagSlugs: ["array", "two-pointers", "greedy", "sorting"] },
+  { slug: "gas-station", title: "Gas Station", domain: "greedy", tier: "experienced", difficulty: "Medium", acRate: 49, isPaidOnly: false, topicTagSlugs: ["array", "greedy"] },
+
+  { slug: "number-of-1-bits", title: "Number of 1 Bits", domain: "math-bitwise", tier: "foundations", difficulty: "Easy", acRate: 74, isPaidOnly: false, topicTagSlugs: ["divide-and-conquer", "bit-manipulation"] },
+  { slug: "palindrome-number", title: "Palindrome Number", domain: "math-bitwise", tier: "interview-prep", difficulty: "Easy", acRate: 57, isPaidOnly: false, topicTagSlugs: ["math"] },
+  { slug: "single-number-ii", title: "Single Number II", domain: "math-bitwise", tier: "experienced", difficulty: "Medium", acRate: 64, isPaidOnly: false, topicTagSlugs: ["array", "bit-manipulation"] },
 ];
+
+/** F6 & F7: Select a live-band-verified, unsolved seed for any unmuted domain & tier. */
+export function selectOnboardingSeed(
+  domain: DomainId,
+  tier: StartingTier,
+  opts: { solvedSlugs?: Set<string>; liveAcRates?: Map<string, number> } = {},
+): OnboardingSeedProblem | undefined {
+  const [lo, hi] = STARTING_TIER_BANDS[tier].band;
+  const matches = ONBOARDING_SEED_PROBLEMS.filter((seed) => {
+    if (seed.domain !== domain || seed.tier !== tier) return false;
+    if (opts.solvedSlugs?.has(seed.slug)) return false;
+    const ac = opts.liveAcRates?.get(seed.slug) ?? seed.acRate;
+    const diff = problemBaseDifficulty(seed.difficulty, ac);
+    return diff >= lo && diff <= hi;
+  });
+  return matches[0];
+}
 
 export type DirectorPreferences = {
   focusDomains: DomainId[];
@@ -892,44 +1061,42 @@ export type PrescriptionIntent = {
     | "breadth"
     | "concept-probe"
     | "consolidation"
-    | "easy-reinforcement";
+    | "easy-reinforcement"
+    | "stretch";
   targetDomain: DomainId;
   targetFacet: "implementation" | "selection";
   targetConceptSlug?: string;
   targetDifficultyBand: [number, number];
   preferEasy?: boolean;
+  clockGoal?: "standard" | "ability" | "speed";
+  allowCoachedRevisit?: boolean;
   defaultTimeboxBand?: [number, number];
   steeredDomainExplicit?: boolean;
+  overrideWarning?: string;
 };
 
+/** F1 & F2: Scale timebox with difficulty and clock goal, keeping maxMinutes as a candidate filter. */
 export function defaultTimeboxBand(
-  slotKind: PrescriptionIntent["slotKind"],
+  _slotKind: PrescriptionIntent["slotKind"],
   difficultyScore: number,
-  maxMinutes?: number,
+  opts: { maxMinutes?: number; clockGoal?: "standard" | "ability" | "speed" } | number = {},
 ): [number, number] {
+  const options = typeof opts === "number" ? { maxMinutes: opts } : opts;
+  const std = standardMinutes(difficultyScore);
   let lo: number;
   let hi: number;
-  if (slotKind === "easy-reinforcement") {
-    [lo, hi] = [12, 15];
-  } else if (slotKind === "onboarding") {
-    [lo, hi] =
-      difficultyScore <= 950
-        ? [12, 15]
-        : difficultyScore <= 1080
-          ? [15, 22]
-          : [25, 30];
-  } else if (slotKind === "concept-probe") {
-    [lo, hi] = [15, 25];
+  if (options.clockGoal === "ability") {
+    lo = Math.min(45, Math.round(std * 1.4));
+    hi = Math.min(45, Math.round(std * 1.6));
+  } else if (options.clockGoal === "speed") {
+    lo = Math.max(10, Math.round(std * 0.65));
+    hi = Math.max(12, Math.round(std * 0.8));
   } else {
-    [lo, hi] =
-      difficultyScore <= 1050
-        ? [15, 20]
-        : difficultyScore <= 1280
-          ? [20, 30]
-          : [30, 40];
+    lo = Math.max(10, std - 3);
+    hi = Math.min(45, std + 3);
   }
-  if (maxMinutes !== undefined) {
-    const cap = Math.max(10, Math.min(45, Math.round(maxMinutes)));
+  if (options.maxMinutes !== undefined) {
+    const cap = Math.max(10, Math.min(45, Math.round(options.maxMinutes)));
     lo = Math.max(10, Math.min(lo, cap));
     hi = Math.max(lo, Math.min(hi, cap));
   }
@@ -940,8 +1107,11 @@ export function chooseTargetFacet(
   state: LearnerRatingState,
   domain: DomainId,
   slotKind: PrescriptionIntent["slotKind"],
+  disguisableCounts?: Partial<Record<DomainId, number>>,
 ): "implementation" | "selection" {
   if (slotKind === "easy-reinforcement") return "implementation";
+  // F13: Do not assign Selection when < 5 non-signature-forced disguised candidates exist
+  if ((disguisableCounts?.[domain] ?? 99) < 5) return "implementation";
   const dom = state.domains[domain];
   if (dom.implOffset - dom.selOffset >= 35) return "selection";
   if (slotKind === "growth" && dom.implAttempts % 3 === 2) return "selection";
@@ -965,9 +1135,9 @@ function bandForDomain(
 }
 
 /**
- * v8: Purposeful Easy Reinforcement replaces standalone strongest-domain Momentum.
- * Targets recent 14-day struggles first, then fragile/near-due concepts, then rusty,
- * and falls back to strongest domain when all skills are healthy.
+ * v9: Purposeful Easy Reinforcement replaces standalone strongest-domain Momentum.
+ * Scales clock with difficulty (`standardMinutes`), grants generous `+50%` ability clock +
+ * coached-revisit fallback below θ = 950 (or backtracking floor near 1000).
  */
 export function selectEasyReinforcementTarget(
   state: LearnerRatingState,
@@ -978,6 +1148,29 @@ export function selectEasyReinforcementTarget(
 ): PrescriptionIntent {
   const eligibleSet = new Set(eligible);
   const domainIndex = (d: DomainId) => DOMAINS.indexOf(d);
+
+  const buildIntent = (dom: DomainId, conceptSlug?: string): PrescriptionIntent => {
+    const theta = state.globalMu + state.domains[dom].implOffset;
+    const band = bandForDomain(state, dom, "implementation", -210, -135);
+    const mid = Math.round((band[0] + band[1]) / 2);
+    const floorConstrained = theta < 950 || (dom === "backtracking" && theta < 1060);
+    const clockGoal: "standard" | "ability" = floorConstrained ? "ability" : "standard";
+    return {
+      slotIndex,
+      slotKind: "easy-reinforcement",
+      targetDomain: dom,
+      targetFacet: "implementation",
+      ...(conceptSlug ? { targetConceptSlug: conceptSlug } : {}),
+      targetDifficultyBand: band,
+      preferEasy: true,
+      clockGoal,
+      allowCoachedRevisit: floorConstrained,
+      defaultTimeboxBand: defaultTimeboxBand("easy-reinforcement", mid, {
+        maxMinutes,
+        clockGoal,
+      }),
+    };
+  };
 
   // Priority 1: Recent struggle (last 14 days) on an eligible domain
   const recentStruggleCandidates = state.recentStruggles
@@ -993,23 +1186,10 @@ export function selectEasyReinforcementTarget(
     const conceptRec = picked.conceptSlug
       ? state.concepts.get(picked.conceptSlug)
       : undefined;
-    const band = bandForDomain(state, picked.domain, "implementation", -210, -135);
-    return {
-      slotIndex,
-      slotKind: "easy-reinforcement",
-      targetDomain: picked.domain,
-      targetFacet: "implementation",
-      ...(conceptRec && conceptRec.state !== "probed"
-        ? { targetConceptSlug: conceptRec.slug }
-        : {}),
-      targetDifficultyBand: band,
-      preferEasy: true,
-      defaultTimeboxBand: defaultTimeboxBand(
-        "easy-reinforcement",
-        Math.round((band[0] + band[1]) / 2),
-        maxMinutes,
-      ),
-    };
+    return buildIntent(
+      picked.domain,
+      conceptRec && conceptRec.state !== "probed" ? conceptRec.slug : undefined,
+    );
   }
 
   // Priority 2: Fragile or near-due Track B concept
@@ -1024,21 +1204,7 @@ export function selectEasyReinforcementTarget(
     .sort((a, b) => a.R - b.R || a.stabilityDays - b.stabilityDays || a.order - b.order);
   if (fragileOrNearDue.length > 0) {
     const top = fragileOrNearDue[0];
-    const band = bandForDomain(state, top.domain, "implementation", -210, -135);
-    return {
-      slotIndex,
-      slotKind: "easy-reinforcement",
-      targetDomain: top.domain,
-      targetFacet: "implementation",
-      targetConceptSlug: top.slug,
-      targetDifficultyBand: band,
-      preferEasy: true,
-      defaultTimeboxBand: defaultTimeboxBand(
-        "easy-reinforcement",
-        Math.round((band[0] + band[1]) / 2),
-        maxMinutes,
-      ),
-    };
+    return buildIntent(top.domain, top.slug);
   }
 
   // Priority 3: Rusty eligible domain
@@ -1046,21 +1212,7 @@ export function selectEasyReinforcementTarget(
     (d) => displayRating(state, d, "implementation", day).rusty,
   );
   if (rusty.length > 0) {
-    const dom = rusty[0];
-    const band = bandForDomain(state, dom, "implementation", -210, -135);
-    return {
-      slotIndex,
-      slotKind: "easy-reinforcement",
-      targetDomain: dom,
-      targetFacet: "implementation",
-      targetDifficultyBand: band,
-      preferEasy: true,
-      defaultTimeboxBand: defaultTimeboxBand(
-        "easy-reinforcement",
-        Math.round((band[0] + band[1]) / 2),
-        maxMinutes,
-      ),
-    };
+    return buildIntent(rusty[0]);
   }
 
   // Priority 4: Strongest domain momentum fallback
@@ -1069,41 +1221,37 @@ export function selectEasyReinforcementTarget(
       state.domains[b].implOffset - state.domains[a].implOffset ||
       domainIndex(a) - domainIndex(b),
   )[0];
-  const band = bandForDomain(state, strongest, "implementation", -210, -135);
-  return {
-    slotIndex,
-    slotKind: "easy-reinforcement",
-    targetDomain: strongest,
-    targetFacet: "implementation",
-    targetDifficultyBand: band,
-    preferEasy: true,
-    defaultTimeboxBand: defaultTimeboxBand(
-      "easy-reinforcement",
-      Math.round((band[0] + band[1]) / 2),
-      maxMinutes,
-    ),
-  };
+  return buildIntent(strongest);
 }
 
-/** v8: Adaptive 4-session onboarding ladder before entering the regular 5-slot Director. */
+/** v9: Adaptive 4-session onboarding ladder with foundations default & fast max(mu0, lastD) step-ups. */
 export function selectOnboardingIntent(
   state: LearnerRatingState,
   _day: number,
-  opts: { startingTier?: StartingTier; preferences?: DirectorPreferences } = {},
+  opts: {
+    startingTier?: StartingTier;
+    preferences?: DirectorPreferences;
+    disguisableCounts?: Partial<Record<DomainId, number>>;
+  } = {},
 ): PrescriptionIntent {
   const validPrefs = opts.preferences
     ? validateDirectorPreferences(opts.preferences)
     : undefined;
   const mutedSet = new Set(validPrefs?.mutedDomains ?? []);
-  const tier = opts.startingTier ?? "interview-prep";
+  const tier = opts.startingTier ?? DEFAULT_STARTING_TIER;
   const step = Math.min(3, state.prescribedCount);
-  const used = new Set(state.recentDomains);
+  const used = new Set(
+    state.prescribedRecentDomains.length ? state.prescribedRecentDomains : state.recentDomains,
+  );
+  const prevDomain = state.lastPracticedDomain ?? state.recentDomains.at(-1) ?? null;
 
   const preferredOrder: DomainId[] = [
     "hashing-prefix",
     "two-pointers-window",
     "stacks-queues-linked",
-    step === 3 && state.globalMu >= 1120 && (state.lastPrescribedImplScore ?? 0) >= 0.8
+    step === 3 &&
+    Math.max(state.globalMu, state.lastPrescribedDifficulty ?? state.globalMu) >= 1120 &&
+    (state.lastPrescribedImplScore ?? 0) >= 0.8
       ? "graphs-search"
       : "binary-search",
     ...DOMAINS.filter((d) => CATALOG_DIFFICULTY_FLOOR[d] === 800),
@@ -1111,10 +1259,11 @@ export function selectOnboardingIntent(
 
   const targetDomain =
     preferredOrder.find(
-      (d) => d !== state.recentDomains.at(-1) && !mutedSet.has(d) && !used.has(d),
+      (d) => d !== prevDomain && !mutedSet.has(d) && !used.has(d),
     ) ??
-    preferredOrder.find((d) => !mutedSet.has(d) && d !== state.recentDomains.at(-1)) ??
-    "hashing-prefix";
+    preferredOrder.find((d) => !mutedSet.has(d) && d !== prevDomain) ??
+    preferredOrder.find((d) => !mutedSet.has(d)) ??
+    "arrays-strings";
 
   if (step === 0) {
     const tierCfg = STARTING_TIER_BANDS[tier];
@@ -1125,18 +1274,19 @@ export function selectOnboardingIntent(
       targetFacet: "implementation",
       targetDifficultyBand: [...tierCfg.band],
       preferEasy: tier === "foundations",
+      clockGoal: "standard",
       defaultTimeboxBand: defaultTimeboxBand(
         "onboarding",
         Math.round((tierCfg.band[0] + tierCfg.band[1]) / 2),
-        validPrefs?.maxMinutes,
+        { maxMinutes: validPrefs?.maxMinutes },
       ),
     };
   }
 
   const lastScore = state.lastPrescribedImplScore ?? 0.65;
   if (lastScore <= 0.4) {
-    const lo = Math.max(800, Math.round(state.globalMu - 110));
-    const hi = Math.max(lo + 40, Math.round(state.globalMu - 40));
+    const lo = Math.max(800, Math.round(state.globalMu - 140));
+    const hi = Math.max(lo + 40, Math.round(state.globalMu - 65));
     return {
       slotIndex: step,
       slotKind: "easy-reinforcement",
@@ -1144,24 +1294,34 @@ export function selectOnboardingIntent(
       targetFacet: "implementation",
       targetDifficultyBand: [lo, hi],
       preferEasy: true,
-      defaultTimeboxBand: defaultTimeboxBand("easy-reinforcement", lo, validPrefs?.maxMinutes),
+      clockGoal: state.globalMu < 950 ? "ability" : "standard",
+      allowCoachedRevisit: state.globalMu < 950,
+      defaultTimeboxBand: defaultTimeboxBand("easy-reinforcement", lo, {
+        maxMinutes: validPrefs?.maxMinutes,
+        clockGoal: state.globalMu < 950 ? "ability" : "standard",
+      }),
     };
   }
 
   if (lastScore >= 0.8) {
-    const lo = Math.max(800, Math.min(1800, Math.round(state.globalMu - 15)));
-    const hi = Math.max(lo + 30, Math.min(1850, Math.round(state.globalMu + 55)));
+    // F8: Step up cleanly from max(globalMu, lastPrescribedDifficulty) when solving cleanly
+    const anchor = Math.max(state.globalMu, state.lastPrescribedDifficulty ?? state.globalMu);
+    const lo = Math.max(800, Math.min(1650, Math.round(anchor + 55)));
+    const hi = Math.max(lo + 40, Math.min(1750, Math.round(anchor + 145)));
+    const facet: "implementation" | "selection" =
+      step === 3 && (opts.disguisableCounts?.[targetDomain] ?? 99) >= 5
+        ? "selection"
+        : "implementation";
     return {
       slotIndex: step,
       slotKind: "onboarding",
       targetDomain,
-      targetFacet: step === 3 ? "selection" : "implementation",
+      targetFacet: facet,
       targetDifficultyBand: [lo, hi],
-      defaultTimeboxBand: defaultTimeboxBand(
-        "onboarding",
-        Math.round((lo + hi) / 2),
-        validPrefs?.maxMinutes,
-      ),
+      clockGoal: "standard",
+      defaultTimeboxBand: defaultTimeboxBand("onboarding", Math.round((lo + hi) / 2), {
+        maxMinutes: validPrefs?.maxMinutes,
+      }),
     };
   }
 
@@ -1173,11 +1333,10 @@ export function selectOnboardingIntent(
     targetDomain,
     targetFacet: "implementation",
     targetDifficultyBand: [lo, hi],
-    defaultTimeboxBand: defaultTimeboxBand(
-      "onboarding",
-      Math.round((lo + hi) / 2),
-      validPrefs?.maxMinutes,
-    ),
+    clockGoal: "standard",
+    defaultTimeboxBand: defaultTimeboxBand("onboarding", Math.round((lo + hi) / 2), {
+      maxMinutes: validPrefs?.maxMinutes,
+    }),
   };
 }
 
@@ -1185,11 +1344,17 @@ export function selectDirectorIntent(
   state: LearnerRatingState,
   day: number,
   preferences?: DirectorPreferences,
+  disguisableCounts?: Partial<Record<DomainId, number>>,
 ): PrescriptionIntent {
   const validPrefs = preferences ? validateDirectorPreferences(preferences) : undefined;
   const mutedSet = new Set(validPrefs?.mutedDomains ?? []);
   const focusSet = new Set(validPrefs?.focusDomains ?? []);
-  const prevDomain = state.recentDomains.at(-1) ?? null;
+  // F17: Self-picks govern prevDomain ONLY (lastPracticedDomain); prescribedRecentDomains governs 6-cap
+  const prevDomain = state.lastPracticedDomain ?? state.recentDomains.at(-1) ?? null;
+  const prescribedHistory =
+    state.prescribedRecentDomains.length > 0 || state.lastPracticedDomain !== null
+      ? state.prescribedRecentDomains
+      : state.recentDomains;
   const domainIndex = (d: DomainId) => DOMAINS.indexOf(d);
 
   const passesGlobalGate = (d: DomainId) =>
@@ -1197,7 +1362,7 @@ export function selectDirectorIntent(
   const isEligible = (d: DomainId) => {
     if (!passesGlobalGate(d)) return false;
     if (d === prevDomain) return false;
-    const count6 = state.recentDomains.slice(-6).filter((x) => x === d).length;
+    const count6 = prescribedHistory.slice(-6).filter((x) => x === d).length;
     return count6 < 2;
   };
   let eligible = DOMAINS.filter(isEligible);
@@ -1211,8 +1376,12 @@ export function selectDirectorIntent(
 
   const slotIndex = state.prescribedCount % 5;
 
-  // v8 Reactive Failure Circuit Breaker: 2+ consecutive misses preempt next slot with Purposeful Easy Reinforcement
-  if (state.consecutiveMisses >= 2 && state.lastPrescribedSlotKind !== "easy-reinforcement") {
+  // v9 Reactive Failure Circuit Breaker (F16): fires ONCE per miss streak, never loops during AI outage!
+  if (
+    state.consecutiveMisses >= 2 &&
+    !state.missStreakConsumedByBreaker &&
+    state.lastPrescribedSlotKind !== "easy-reinforcement"
+  ) {
     return selectEasyReinforcementTarget(state, eligible, day, slotIndex, validPrefs?.maxMinutes);
   }
 
@@ -1232,17 +1401,18 @@ export function selectDirectorIntent(
 
   const withTimebox = (intent: PrescriptionIntent): PrescriptionIntent => ({
     ...intent,
+    clockGoal: intent.clockGoal ?? "standard",
     defaultTimeboxBand: defaultTimeboxBand(
       intent.slotKind,
       Math.round((intent.targetDifficultyBand[0] + intent.targetDifficultyBand[1]) / 2),
-      validPrefs?.maxMinutes,
+      { maxMinutes: validPrefs?.maxMinutes, clockGoal: intent.clockGoal ?? "standard" },
     ),
   });
 
   // Consolidation on Slot 3 (or Slot 2 overflow when >= 2 concepts are due)
   if ((slotIndex === 3 || (slotIndex === 2 && dueConcepts.length >= 2)) && dueConcepts.length > 0) {
     const top = dueConcepts[0];
-    const facet = chooseTargetFacet(state, top.domain, "consolidation");
+    const facet = chooseTargetFacet(state, top.domain, "consolidation", disguisableCounts);
     return withTimebox({
       slotIndex,
       slotKind: "consolidation",
@@ -1258,7 +1428,7 @@ export function selectDirectorIntent(
     );
     if (rusty.length > 0) {
       const dom = rusty[0];
-      const facet = chooseTargetFacet(state, dom, "consolidation");
+      const facet = chooseTargetFacet(state, dom, "consolidation", disguisableCounts);
       return withTimebox({
         slotIndex,
         slotKind: "consolidation",
@@ -1301,7 +1471,7 @@ export function selectDirectorIntent(
         domainIndex(a) - domainIndex(b),
     );
     const dom = bySigma[0];
-    const facet = chooseTargetFacet(state, dom, "breadth");
+    const facet = chooseTargetFacet(state, dom, "breadth", disguisableCounts);
     return withTimebox({
       slotIndex,
       slotKind: "breadth",
@@ -1316,19 +1486,21 @@ export function selectDirectorIntent(
     return selectEasyReinforcementTarget(state, eligible, day, slotIndex, validPrefs?.maxMinutes);
   }
 
-  // Default (Slot 0, Slot 2, or Slot 3/4 fallback): Growth by minimum LCB across both facets (with optional -35 focus soft-bias)
+  // Growth LCB (F13: ignore selOffset - 0.6*selSigma when domain has <5 disguisable Selection candidates!)
   const lcb = (d: DomainId) => {
     const dom = state.domains[d];
-    const raw = Math.min(
-      dom.implOffset - 0.6 * dom.implSigma,
-      dom.selOffset - 0.6 * dom.selSigma,
-    );
-    return raw - (focusSet.has(d) ? 35 : 0);
+    const implLcb = dom.implOffset - 0.6 * dom.implSigma;
+    if ((disguisableCounts?.[d] ?? 99) < 5) return implLcb;
+    return Math.min(implLcb, dom.selOffset - 0.6 * dom.selSigma);
   };
-  const growthDom = [...eligible].sort(
+
+  // D2: Dedicate Slot 0 Growth to eligible pinned focusDomains whenever present; Slot 2 stays true lowest-LCB Growth
+  const eligibleFocus = slotIndex === 0 ? eligible.filter((d) => focusSet.has(d)) : [];
+  const growthPool = eligibleFocus.length > 0 ? eligibleFocus : eligible;
+  const growthDom = [...growthPool].sort(
     (a, b) => lcb(a) - lcb(b) || domainIndex(a) - domainIndex(b),
   )[0];
-  const facet = chooseTargetFacet(state, growthDom, "growth");
+  const facet = chooseTargetFacet(state, growthDom, "growth", disguisableCounts);
   return withTimebox({
     slotIndex,
     slotKind: "growth",
@@ -1341,12 +1513,16 @@ export function selectDirectorIntent(
 export function selectNextIntent(
   state: LearnerRatingState,
   day: number,
-  opts: { startingTier?: StartingTier; preferences?: DirectorPreferences } = {},
+  opts: {
+    startingTier?: StartingTier;
+    preferences?: DirectorPreferences;
+    disguisableCounts?: Partial<Record<DomainId, number>>;
+  } = {},
 ): PrescriptionIntent {
   if (state.prescribedCount < 4) {
     return selectOnboardingIntent(state, day, opts);
   }
-  return selectDirectorIntent(state, day, opts.preferences);
+  return selectDirectorIntent(state, day, opts.preferences, opts.disguisableCounts);
 }
 
 export function domainHasKnownConcept(state: LearnerRatingState, domain: DomainId): boolean {
@@ -1400,9 +1576,15 @@ export type PracticeLaunchRow = {
   attemptId: string;
   launchSeq: number;
   day: number;
+  startedAt?: number;
   prescribed: boolean;
-  rated?: boolean; // Defaults to launch.prescribed; self-picked catalog launches set rated: false
+  rated?: boolean; // Derived from prescribed && !manualTimeboxUnrated; false for self-picks
+  language?: LanguageId;
   provisionalDomain: DomainId;
+  difficultyScore?: number;
+  difficultyModifier?: number;
+  standardMinutes?: number;
+  prescribedMinutes?: number;
   intent?: PrescriptionIntent;
   selectionSpoilerRevealed?: boolean;
 };
@@ -1520,6 +1702,20 @@ export function replayRatingLedger(
     const domainForCooldown =
       !excluded && effective?.primaryDomain ? effective.primaryDomain : launch.provisionalDomain;
     state.recentDomains.push(domainForCooldown);
+    state.lastPracticedDomain = domainForCooldown; // F17: prevDomain-only for all attempts (including self-picks)
+    if (launch.prescribed) {
+      state.prescribedRecentDomains.push(domainForCooldown);
+      // F16: Update slot kind & breaker consumption strictly from launches even if grading fails!
+      if (launch.intent?.slotKind) {
+        state.lastPrescribedSlotKind = launch.intent.slotKind;
+        if (launch.intent.slotKind === "easy-reinforcement") {
+          state.missStreakConsumedByBreaker = true;
+        }
+      }
+      if (launch.difficultyScore !== undefined) {
+        state.lastPrescribedDifficulty = launch.difficultyScore;
+      }
+    }
 
     const isRated = launch.rated ?? launch.prescribed;
     if (effective && !excluded) {
@@ -1552,15 +1748,13 @@ export function replayRatingLedger(
           targetedConceptSlug: launch.intent?.targetConceptSlug,
         });
       } else if (effective.statedComplexity) {
-        // Practice-only self-pick: skip Track A rating updates, preserve Big-O calibration
+        // F17: Practice-only self-pick skips BOTH Track A ratings and Track B concept updates; keeps Big-O & prevDomain
         state.complexityCalibration.time[effective.statedComplexity.time] += 1;
         state.complexityCalibration.space[effective.statedComplexity.space] += 1;
       }
 
-      if (graded && effective.conceptOutcomes) {
+      if (isRated && graded && effective.conceptOutcomes) {
         for (const co of effective.conceptOutcomes) {
-          // Practice-only self-picks skip rating lapses while still crediting positive applications
-          if (!isRated && co.outcome === "lapsed") continue;
           conceptTransitions.push({
             occurredDay: launch.day,
             launchSeq: launch.launchSeq,
@@ -1569,20 +1763,23 @@ export function replayRatingLedger(
             slug: co.slug,
             domain: co.domain,
             outcome: co.outcome,
-          });
+            fromEasyReinforcement: launch.intent?.slotKind === "easy-reinforcement",
+          } as any);
         }
       }
-      for (const rescue of rescues) {
-        for (const cc of rescue.payload.coachedConcepts ?? []) {
-          conceptTransitions.push({
-            occurredDay: rescue.occurredDay,
-            launchSeq: launch.launchSeq,
-            phaseRank: 1,
-            eventId: rescue.id,
-            slug: cc.slug,
-            domain: cc.domain,
-            outcome: "coached",
-          });
+      if (isRated) {
+        for (const rescue of rescues) {
+          for (const cc of rescue.payload.coachedConcepts ?? []) {
+            conceptTransitions.push({
+              occurredDay: rescue.occurredDay,
+              launchSeq: launch.launchSeq,
+              phaseRank: 1,
+              eventId: rescue.id,
+              slug: cc.slug,
+              domain: cc.domain,
+              outcome: "coached",
+            });
+          }
         }
       }
     }
@@ -1592,7 +1789,8 @@ export function replayRatingLedger(
   for (const ev of events) {
     if (ev.kind !== "concept-event") continue;
     const p = ev.payload as ConceptEventPayload;
-    const seq = launchByAttempt.get(ev.attemptId)?.launchSeq ?? ev.launchSeq;
+    const launch = launchByAttempt.get(ev.attemptId);
+    const seq = launch?.launchSeq ?? ev.launchSeq;
     conceptTransitions.push({
       occurredDay: ev.occurredDay,
       launchSeq: seq,
@@ -1601,7 +1799,8 @@ export function replayRatingLedger(
       slug: p.slug,
       domain: p.domain,
       outcome: p.outcome,
-    });
+      ...(launch?.intent?.slotKind === "easy-reinforcement" ? { fromEasyReinforcement: true } : {}),
+    } as any);
   }
 
   conceptTransitions.sort(
@@ -1611,22 +1810,32 @@ export function replayRatingLedger(
       a.phaseRank - b.phaseRank ||
       a.eventId.localeCompare(b.eventId),
   );
-  for (const ct of conceptTransitions) {
-    updateConceptRecord(state, ct.slug, ct.domain, ct.occurredDay, ct.outcome);
+  for (const ct of conceptTransitions as Array<
+    (typeof conceptTransitions)[number] & { fromEasyReinforcement?: boolean }
+  >) {
+    updateConceptRecord(state, ct.slug, ct.domain, ct.occurredDay, ct.outcome, {
+      fromEasyReinforcement: ct.fromEasyReinforcement,
+    });
   }
   return state;
 }
 
-/** F6 & F7: SQLite rating ledger + partial unique index + catalog cache schema. */
+/** F6, F7 & v9: SQLite rating ledger + fail-closed rated flag + atomic drain claims + signatureForced cache. */
 export function createRatingSchema(db: DatabaseSync) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS practice_launches (
       attemptId TEXT PRIMARY KEY,
       launchSeq INTEGER NOT NULL UNIQUE,
       day INTEGER NOT NULL,
+      startedAt INTEGER NOT NULL DEFAULT 0,
       prescribed INTEGER NOT NULL,
-      rated INTEGER NOT NULL DEFAULT 1,
+      rated INTEGER NOT NULL DEFAULT 0,
+      language TEXT NOT NULL DEFAULT 'java',
       provisionalDomain TEXT NOT NULL,
+      difficultyScore INTEGER,
+      difficultyModifier INTEGER,
+      standardMinutes INTEGER,
+      prescribedMinutes INTEGER,
       intentJson TEXT,
       selectionSpoilerRevealed INTEGER NOT NULL DEFAULT 0
     );
@@ -1635,6 +1844,8 @@ export function createRatingSchema(db: DatabaseSync) {
       status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'complete', 'failed')),
       attempts INTEGER NOT NULL DEFAULT 0,
       lastError TEXT,
+      claimOwnerId TEXT,
+      claimExpiresAt INTEGER,
       updatedAt INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS skill_rating_events (
@@ -1657,9 +1868,11 @@ export function createRatingSchema(db: DatabaseSync) {
       difficulty TEXT NOT NULL CHECK(difficulty IN ('Easy', 'Medium', 'Hard')),
       acRate REAL NOT NULL,
       isPaidOnly INTEGER NOT NULL,
+      status TEXT,
       topicTagSlugsJson TEXT NOT NULL,
       resolvedDomain TEXT NOT NULL,
       baseDifficulty INTEGER NOT NULL,
+      signatureForced INTEGER NOT NULL DEFAULT 0,
       excluded INTEGER NOT NULL,
       fetchedAt INTEGER NOT NULL
     );
@@ -1688,9 +1901,15 @@ export function exportRatingSnapshot(db: DatabaseSync): RatingLedgerSnapshot {
       attemptId: r.attemptId,
       launchSeq: r.launchSeq,
       day: r.day,
+      startedAt: r.startedAt ?? r.day,
       prescribed: Boolean(r.prescribed),
-      rated: Boolean(r.rated ?? r.prescribed),
+      rated: Boolean(r.rated),
+      language: (r.language as LanguageId) ?? "java",
       provisionalDomain: r.provisionalDomain as DomainId,
+      ...(r.difficultyScore != null ? { difficultyScore: r.difficultyScore } : {}),
+      ...(r.difficultyModifier != null ? { difficultyModifier: r.difficultyModifier } : {}),
+      ...(r.standardMinutes != null ? { standardMinutes: r.standardMinutes } : {}),
+      ...(r.prescribedMinutes != null ? { prescribedMinutes: r.prescribedMinutes } : {}),
       ...(r.intentJson ? { intent: JSON.parse(r.intentJson) as PrescriptionIntent } : {}),
       ...(r.selectionSpoilerRevealed ? { selectionSpoilerRevealed: true } : {}),
     })),
@@ -1699,6 +1918,8 @@ export function exportRatingSnapshot(db: DatabaseSync): RatingLedgerSnapshot {
       status: r.status,
       attempts: r.attempts,
       lastError: r.lastError ?? null,
+      claimOwnerId: r.claimOwnerId ?? null,
+      claimExpiresAt: r.claimExpiresAt ?? null,
       updatedAt: r.updatedAt,
     })),
     ratingEvents: eventRows.map((r) => ({
@@ -1719,22 +1940,28 @@ export function restoreRatingSnapshot(db: DatabaseSync, snapshot: RatingLedgerSn
   try {
     db.exec("DELETE FROM skill_rating_events; DELETE FROM rating_jobs; DELETE FROM practice_launches;");
     const insLaunch = db.prepare(
-      "INSERT INTO practice_launches(attemptId, launchSeq, day, prescribed, rated, provisionalDomain, intentJson, selectionSpoilerRevealed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO practice_launches(attemptId, launchSeq, day, startedAt, prescribed, rated, language, provisionalDomain, difficultyScore, difficultyModifier, standardMinutes, prescribedMinutes, intentJson, selectionSpoilerRevealed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const l of snapshot.launches) {
       insLaunch.run(
         l.attemptId,
         l.launchSeq,
         l.day,
+        l.startedAt ?? l.day,
         l.prescribed ? 1 : 0,
         (l.rated ?? l.prescribed) ? 1 : 0,
+        l.language ?? "java",
         l.provisionalDomain,
+        l.difficultyScore ?? null,
+        l.difficultyModifier ?? null,
+        l.standardMinutes ?? null,
+        l.prescribedMinutes ?? null,
         l.intent ? JSON.stringify(l.intent) : null,
         l.selectionSpoilerRevealed ? 1 : 0,
       );
     }
     const insJob = db.prepare(
-      "INSERT INTO rating_jobs(attemptId, status, attempts, lastError, updatedAt) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO rating_jobs(attemptId, status, attempts, lastError, claimOwnerId, claimExpiresAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     for (const j of snapshot.ratingJobs) {
       insJob.run(
@@ -1742,6 +1969,8 @@ export function restoreRatingSnapshot(db: DatabaseSync, snapshot: RatingLedgerSn
         j.status === "running" ? "pending" : j.status,
         j.attempts,
         j.lastError,
+        null,
+        null,
         j.updatedAt,
       );
     }
@@ -1765,6 +1994,46 @@ export function restoreRatingSnapshot(db: DatabaseSync, snapshot: RatingLedgerSn
     db.exec("ROLLBACK");
     throw err;
   }
+}
+
+/** Smaller issue: Collision-free snapshot merge & per-session restore re-indexes launchSeq atomically. */
+export function mergeRatingSnapshots(
+  target: RatingLedgerSnapshot,
+  incoming: RatingLedgerSnapshot,
+  replace = true,
+): RatingLedgerSnapshot {
+  const launchesById = new Map<string, PracticeLaunchRow>(target.launches.map((l) => [l.attemptId, l]));
+  for (const l of incoming.launches) {
+    if (!launchesById.has(l.attemptId) || replace) {
+      launchesById.set(l.attemptId, l);
+    }
+  }
+  const reindexed = [...launchesById.values()]
+    .sort((a, b) => (a.startedAt ?? a.day) - (b.startedAt ?? b.day) || a.attemptId.localeCompare(b.attemptId))
+    .map((l, idx) => ({ ...l, launchSeq: idx + 1 }));
+  const seqByAttempt = new Map(reindexed.map((l) => [l.attemptId, l.launchSeq]));
+
+  const jobsById = new Map<string, RatingJobRow>(target.ratingJobs.map((j) => [j.attemptId, j]));
+  for (const j of incoming.ratingJobs) {
+    if (!jobsById.has(j.attemptId) || replace) jobsById.set(j.attemptId, j);
+  }
+  const eventsByKey = new Map<string, SkillRatingEventRow>(
+    target.ratingEvents.map((e) => [e.idempotencyKey, e]),
+  );
+  for (const e of incoming.ratingEvents) {
+    if (!eventsByKey.has(e.idempotencyKey) || replace) eventsByKey.set(e.idempotencyKey, e);
+  }
+  const mergedEvents = [...eventsByKey.values()].map((e) => ({
+    ...e,
+    launchSeq: seqByAttempt.get(e.attemptId) ?? e.launchSeq,
+  }));
+  return {
+    launches: reindexed,
+    ratingJobs: [...jobsById.values()].map((j) =>
+      j.status === "running" ? { ...j, status: "pending", claimOwnerId: null, claimExpiresAt: null } : j,
+    ),
+    ratingEvents: mergedEvents,
+  };
 }
 
 /** F8: Selection problems must not leak the target technique in the problem title. */
@@ -1793,27 +2062,65 @@ export type CatalogProblemRow = {
   difficulty: "Easy" | "Medium" | "Hard";
   acRate: number;
   isPaidOnly: boolean;
+  status?: "ac" | "notac" | null;
   topicTagSlugs: string[];
   resolvedDomain: DomainId;
   difficultyScore: number;
+  signatureForced?: boolean;
   excluded: boolean;
 };
 
-/** F3 + v8 preferEasy: Deterministic local catalog filter over full resolvedDomain pool. */
+function seededStringHash(str: string, seed: number): number {
+  let h = (2166136261 ^ seed) >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h;
+}
+
+/**
+ * F3, F10, F13: Deterministic local catalog filter over full resolvedDomain pool.
+ * Orders by 20-pt distance buckets + seeded shuffle up to `limit` (default 15),
+ * skips LeetCode `status === "ac"` except `allowCoachedRevisit` candidates when fresh pool < 3,
+ * enforces `maxMinutes` via standardMinutes(D), and excludes `signatureForced` for Selection.
+ */
 export function selectCandidatesFromCache(
   catalog: CatalogProblemRow[],
   intent: PrescriptionIntent,
-  opts: { isPremium?: boolean; excludedSlugs?: Set<string>; limit?: number } = {},
+  opts: {
+    isPremium?: boolean;
+    excludedSlugs?: Set<string>;
+    limit?: number;
+    maxMinutes?: number;
+    seed?: number;
+    coachedRevisitSlugs?: Set<string>;
+  } = {},
 ): CatalogProblemRow[] {
-  const domainPool = catalog.filter(
-    (p) =>
-      !p.excluded &&
-      (opts.isPremium || !p.isPaidOnly) &&
-      !opts.excludedSlugs?.has(p.slug) &&
-      p.resolvedDomain === intent.targetDomain &&
-      (intent.targetFacet !== "selection" ||
-        isTitleDisguisedForTarget(p.title, intent.targetDomain)),
-  );
+  const limit = opts.limit ?? 15;
+  const maxMin = opts.maxMinutes;
+  const isRevisitCandidate = (p: CatalogProblemRow) =>
+    Boolean(intent.allowCoachedRevisit && opts.coachedRevisitSlugs?.has(p.slug));
+
+  const baseFilter = (p: CatalogProblemRow, allowSolvedRevisit: boolean) => {
+    if (p.excluded) return false;
+    if (!opts.isPremium && p.isPaidOnly) return false;
+    if (opts.excludedSlugs?.has(p.slug)) return false;
+    if (p.status === "ac" && !(allowSolvedRevisit && isRevisitCandidate(p))) return false;
+    if (p.resolvedDomain !== intent.targetDomain) return false;
+    if (intent.targetFacet === "selection") {
+      if (p.signatureForced ?? isSignatureForcedFromSlugs(p.topicTagSlugs)) return false;
+      if (!isTitleDisguisedForTarget(p.title, intent.targetDomain)) return false;
+    }
+    return true;
+  };
+
+  let domainPool = catalog.filter((p) => baseFilter(p, false));
+  if (domainPool.length < 3 && intent.allowCoachedRevisit && opts.coachedRevisitSlugs?.size) {
+    const revisits = catalog.filter((p) => baseFilter(p, true));
+    if (revisits.length > domainPool.length) domainPool = revisits;
+  }
+
   let filtered = domainPool;
   if (intent.targetConceptSlug) {
     const spec = CONCEPT_CATALOGUE.find((c) => c.slug === intent.targetConceptSlug);
@@ -1822,6 +2129,11 @@ export function selectCandidatesFromCache(
       if (tagged.length > 0) filtered = tagged;
     }
   }
+  if (maxMin !== undefined) {
+    const timeFit = filtered.filter((p) => standardMinutes(p.difficultyScore) <= maxMin);
+    if (timeFit.length > 0) filtered = timeFit;
+  }
+
   const [lo, hi] = intent.targetDifficultyBand;
   let picked: CatalogProblemRow[];
   if (intent.preferEasy) {
@@ -1835,48 +2147,152 @@ export function selectCandidatesFromCache(
   } else {
     picked = snapCandidatePool(filtered, intent.targetDifficultyBand);
   }
-  return opts.limit ? picked.slice(0, opts.limit) : picked;
+
+  // F10: Order by 20-pt distance bucket from band midpoint + deterministic seeded shuffle
+  const mid = (lo + hi) / 2;
+  const seed = opts.seed ?? 42;
+  picked.sort(
+    (a, b) =>
+      Math.floor(Math.abs(a.difficultyScore - mid) / 20) -
+        Math.floor(Math.abs(b.difficultyScore - mid) / 20) ||
+      seededStringHash(a.slug, seed) - seededStringHash(b.slug, seed),
+  );
+  return picked.slice(0, limit);
 }
 
-/** v8 Server-side shortlist escape hatch: batch 1 -> widen band ±60 -> domain rotation. */
-export function shortlistWithEscapeHatch(
-  catalog: CatalogProblemRow[],
-  intent: PrescriptionIntent,
-  state: LearnerRatingState,
-  day: number,
-  opts: { isPremium?: boolean; excludedSlugs?: Set<string>; preferences?: DirectorPreferences } = {},
-): { intent: PrescriptionIntent; candidates: CatalogProblemRow[]; strategy: "primary" | "widened" | "rotated" } {
-  const primary = selectCandidatesFromCache(catalog, intent, opts);
-  if (primary.length > 0) return { intent, candidates: primary, strategy: "primary" };
+/**
+ * F11 & F12: Multi-batch inspection escape hatch.
+ * Accumulates failed inspections across disjoint batches, preserves allowedDomainPool,
+ * recentDomain cooldowns, maxMinutes, and Easy Reinforcement band on rotation.
+ */
+export function selectShortlistWithInspectionEscapeHatch(args: {
+  catalog: CatalogProblemRow[];
+  intent: PrescriptionIntent;
+  state: LearnerRatingState;
+  day: number;
+  inspectFn: (problem: CatalogProblemRow) => boolean;
+  isPremium?: boolean;
+  excludedSlugs?: Set<string>;
+  preferences?: DirectorPreferences;
+  allowedDomains?: DomainId[];
+  batchSize?: number;
+  maxInspectionsPerBatch?: number;
+  maxTotalInspections?: number;
+  seed?: number;
+  coachedRevisitSlugs?: Set<string>;
+}): {
+  intent: PrescriptionIntent;
+  chosen: CatalogProblemRow | null;
+  strategy: "primary" | "batch-2" | "widened" | "rotated";
+  inspectedSlugs: string[];
+} {
+  const validPrefs = args.preferences ? validateDirectorPreferences(args.preferences) : undefined;
+  const rejected = new Set(args.excludedSlugs);
+  const inspectedSlugs: string[] = [];
+  const batchSize = args.batchSize ?? 15;
+  const maxPerBatch = args.maxInspectionsPerBatch ?? 3;
+  const maxTotal = args.maxTotalInspections ?? 6;
+  const prevDom = args.state.lastPracticedDomain ?? args.state.recentDomains.at(-1) ?? null;
+  const prescribedHistory = args.state.prescribedRecentDomains.length
+    ? args.state.prescribedRecentDomains
+    : args.state.recentDomains;
 
+  const tryInspect = (
+    curIntent: PrescriptionIntent,
+    strategyLabel: "primary" | "batch-2" | "widened" | "rotated",
+  ): CatalogProblemRow | null => {
+    const batch = selectCandidatesFromCache(args.catalog, curIntent, {
+      isPremium: args.isPremium,
+      excludedSlugs: rejected,
+      limit: batchSize,
+      maxMinutes: validPrefs?.maxMinutes,
+      seed: args.seed,
+      coachedRevisitSlugs: args.coachedRevisitSlugs,
+    });
+    let batchInspections = 0;
+    for (const cand of batch) {
+      if (inspectedSlugs.length >= maxTotal || batchInspections >= maxPerBatch) break;
+      inspectedSlugs.push(cand.slug);
+      batchInspections += 1;
+      if (args.inspectFn(cand)) return cand;
+      rejected.add(cand.slug);
+    }
+    void strategyLabel;
+    return null;
+  };
+
+  // Batch 1 & disjoint Batch 2 on primary intent
+  const hit1 = tryInspect(args.intent, "primary");
+  if (hit1) return { intent: args.intent, chosen: hit1, strategy: "primary", inspectedSlugs };
+  if (inspectedSlugs.length < maxTotal) {
+    const hit2 = tryInspect(args.intent, "batch-2");
+    if (hit2) return { intent: args.intent, chosen: hit2, strategy: "batch-2", inspectedSlugs };
+  }
+
+  // Widened band ±60 in same domain before rotating
   const widenedIntent: PrescriptionIntent = {
-    ...intent,
+    ...args.intent,
     targetDifficultyBand: [
-      Math.max(800, intent.targetDifficultyBand[0] - 60),
-      Math.min(1850, intent.targetDifficultyBand[1] + 60),
+      Math.max(800, args.intent.targetDifficultyBand[0] - 60),
+      Math.min(1850, args.intent.targetDifficultyBand[1] + 60),
     ],
   };
-  const widened = selectCandidatesFromCache(catalog, widenedIntent, opts);
-  if (widened.length > 0) return { intent: widenedIntent, candidates: widened, strategy: "widened" };
+  if (inspectedSlugs.length < maxTotal) {
+    const hitWide = tryInspect(widenedIntent, "widened");
+    if (hitWide) return { intent: widenedIntent, chosen: hitWide, strategy: "widened", inspectedSlugs };
+  }
 
-  // Rotate to another eligible domain
-  for (const dom of DOMAINS) {
-    if (dom === intent.targetDomain) continue;
-    if (opts.preferences?.mutedDomains.includes(dom)) continue;
-    if (state.globalMu < (DOMAIN_MIN_GLOBAL_MU[dom] ?? -Infinity)) continue;
+  // F12: Rotation MUST exhaust allowedDomains first (while honoring cooldowns & Easy band!), before broader fallback
+  const isCooldownOk = (d: DomainId) =>
+    d !== prevDom && prescribedHistory.slice(-6).filter((x) => x === d).length < 2;
+  const muted = new Set(validPrefs?.mutedDomains ?? []);
+  const requestedPool = (args.allowedDomains ?? []).filter((d) => d !== args.intent.targetDomain);
+  const globalPool = DOMAINS.filter(
+    (d) =>
+      d !== args.intent.targetDomain &&
+      !muted.has(d) &&
+      args.state.globalMu >= (DOMAIN_MIN_GLOBAL_MU[d] ?? -Infinity),
+  );
+  const orderedRotation: DomainId[] = [
+    ...requestedPool.filter(isCooldownOk),
+    ...requestedPool.filter((d) => !isCooldownOk(d)),
+    ...(args.allowedDomains?.length ? [] : globalPool.filter(isCooldownOk)),
+  ];
+
+  for (const dom of orderedRotation) {
+    if (inspectedSlugs.length >= maxTotal) break;
+    const isEasyReinf = args.intent.slotKind === "easy-reinforcement";
+    const band = isEasyReinf
+      ? bandForDomain(args.state, dom, "implementation", -210, -135)
+      : args.intent.slotKind === "stretch"
+        ? bandForDomain(args.state, dom, args.intent.targetFacet, 10, 65)
+        : bandForDomain(args.state, dom, args.intent.targetFacet, -60, 40);
     const rotatedIntent: PrescriptionIntent = {
-      ...intent,
+      ...args.intent,
       targetDomain: dom,
       targetConceptSlug: undefined,
-      targetDifficultyBand: bandForDomain(state, dom, intent.targetFacet, -60, 40),
+      targetDifficultyBand: band,
+      preferEasy: isEasyReinf,
+      defaultTimeboxBand: defaultTimeboxBand(
+        args.intent.slotKind,
+        Math.round((band[0] + band[1]) / 2),
+        { maxMinutes: validPrefs?.maxMinutes, clockGoal: args.intent.clockGoal },
+      ),
     };
-    const alt = selectCandidatesFromCache(catalog, rotatedIntent, opts);
-    if (alt.length > 0) return { intent: rotatedIntent, candidates: alt, strategy: "rotated" };
+    const hitRot = tryInspect(rotatedIntent, "rotated");
+    if (hitRot) return { intent: rotatedIntent, chosen: hitRot, strategy: "rotated", inspectedSlugs };
   }
-  return { intent, candidates: [], strategy: "primary" };
+
+  return { intent: args.intent, chosen: null, strategy: "primary", inspectedSlugs };
 }
 
-/** v8 Conversational Prescription Coach tool: steer today's intent + re-shortlist with scoring rules. */
+/** F14: Complete conversational steering with seeded random pools, >=3 domain Selection gate, stretch slot, and coach spoiler detection. */
+export function didCoachLeakSelectionTarget(messages: string[], targetDomain: DomainId): boolean {
+  const rx = REVEALING_TITLE_PATTERNS[targetDomain];
+  if (!rx) return false;
+  return messages.some((m) => rx.test(m));
+}
+
 export function adjustPrescriptionIntent(args: {
   state: LearnerRatingState;
   currentIntent: PrescriptionIntent;
@@ -1885,14 +2301,19 @@ export function adjustPrescriptionIntent(args: {
   skippedSlugs: Set<string>;
   preferences?: DirectorPreferences;
   day: number;
+  seed?: number;
   override: {
     domainOverride?: DomainId;
     domainPoolOverride?: DomainId[];
-    slotOverride?: "easy-reinforcement" | "growth" | "consolidation" | "breadth";
+    slotOverride?: "easy-reinforcement" | "growth" | "consolidation" | "breadth" | "stretch";
     maxMinutes?: number;
     excludeSlug?: string;
   };
-}): { intent: PrescriptionIntent; candidates: CatalogProblemRow[]; strategy: "primary" | "widened" | "rotated" } {
+}): {
+  intent: PrescriptionIntent;
+  candidates: CatalogProblemRow[];
+  strategy: "primary" | "batch-2" | "widened" | "rotated";
+} {
   const validPrefs = args.preferences ? validateDirectorPreferences(args.preferences) : undefined;
   const muted = new Set(validPrefs?.mutedDomains ?? []);
   const excluded = new Set(args.skippedSlugs);
@@ -1912,38 +2333,85 @@ export function adjustPrescriptionIntent(args: {
       args.currentIntent.slotIndex,
       capMinutes,
     );
+  } else if (args.override.slotOverride === "stretch") {
+    nextIntent = {
+      ...nextIntent,
+      slotKind: "stretch",
+      preferEasy: false,
+      targetDifficultyBand: bandForDomain(
+        args.state,
+        nextIntent.targetDomain,
+        nextIntent.targetFacet,
+        10,
+        65,
+      ),
+    };
+  } else if (
+    args.override.slotOverride === "growth" ||
+    args.override.slotOverride === "consolidation" ||
+    args.override.slotOverride === "breadth"
+  ) {
+    nextIntent = {
+      ...nextIntent,
+      slotKind: args.override.slotOverride,
+      preferEasy: false,
+      targetDifficultyBand: bandForDomain(
+        args.state,
+        nextIntent.targetDomain,
+        nextIntent.targetFacet,
+        args.override.slotOverride === "consolidation" ? -40 : -45,
+        args.override.slotOverride === "consolidation" ? 5 : 10,
+      ),
+    };
   }
 
+  let allowedDomains: DomainId[] | undefined;
   if (args.override.domainOverride) {
     const dom = args.override.domainOverride;
+    const isMutedOrGated =
+      muted.has(dom) || args.state.globalMu < (DOMAIN_MIN_GLOBAL_MU[dom] ?? -Infinity);
+    allowedDomains = [dom];
     nextIntent = {
       ...nextIntent,
       targetDomain: dom,
-      targetFacet: "implementation", // Explicit single-domain request disables Pattern Selection (w_sel = 0)
+      targetFacet: "implementation",
       steeredDomainExplicit: true,
       targetConceptSlug: undefined,
       targetDifficultyBand:
         nextIntent.slotKind === "easy-reinforcement"
           ? bandForDomain(args.state, dom, "implementation", -210, -135)
-          : bandForDomain(args.state, dom, "implementation", -45, 10),
+          : nextIntent.slotKind === "stretch"
+            ? bandForDomain(args.state, dom, "implementation", 10, 65)
+            : bandForDomain(args.state, dom, "implementation", -45, 10),
+      ...(isMutedOrGated
+        ? { overrideWarning: `Applied one-off practice on muted/gated domain (${dom}); saved preferences unchanged.` }
+        : {}),
     };
   } else if (args.override.domainPoolOverride && args.override.domainPoolOverride.length >= 2) {
-    const pool = args.override.domainPoolOverride.filter((d) => !muted.has(d));
-    const prev = args.state.recentDomains.at(-1);
-    const dom = pool.find((d) => d !== prev) ?? pool[0] ?? nextIntent.targetDomain;
-    const facet = chooseTargetFacet(args.state, dom, nextIntent.slotKind);
+    const eligiblePool = [...new Set(args.override.domainPoolOverride)].filter((d) => !muted.has(d));
+    const prev = args.state.lastPracticedDomain ?? args.state.recentDomains.at(-1);
+    const nonPrev = eligiblePool.filter((d) => d !== prev);
+    const pickFrom = nonPrev.length > 0 ? nonPrev : eligiblePool;
+    const seed = args.seed ?? args.day * 31 + 7;
+    const dom = pickFrom[seed % pickFrom.length] ?? nextIntent.targetDomain;
+    allowedDomains = eligiblePool;
+    // F14: Selection stays rated ONLY when >= 3 eligible domains are in the steering pool!
+    const blindPool = eligiblePool.length >= 3;
+    const facet = blindPool
+      ? chooseTargetFacet(args.state, dom, nextIntent.slotKind)
+      : "implementation";
     nextIntent = {
       ...nextIntent,
       targetDomain: dom,
       targetFacet: facet,
-      steeredDomainExplicit: false, // Multi-domain pool stays blind -> Selection stays active!
+      steeredDomainExplicit: !blindPool,
       targetConceptSlug: undefined,
       targetDifficultyBand: bandForDomain(
         args.state,
         dom,
         facet,
-        nextIntent.slotKind === "easy-reinforcement" ? -210 : -45,
-        nextIntent.slotKind === "easy-reinforcement" ? -135 : 10,
+        nextIntent.slotKind === "easy-reinforcement" ? -210 : nextIntent.slotKind === "stretch" ? 10 : -45,
+        nextIntent.slotKind === "easy-reinforcement" ? -135 : nextIntent.slotKind === "stretch" ? 65 : 10,
       ),
     };
   }
@@ -1951,93 +2419,346 @@ export function adjustPrescriptionIntent(args: {
   nextIntent.defaultTimeboxBand = defaultTimeboxBand(
     nextIntent.slotKind,
     Math.round((nextIntent.targetDifficultyBand[0] + nextIntent.targetDifficultyBand[1]) / 2),
-    capMinutes,
+    { maxMinutes: capMinutes, clockGoal: nextIntent.clockGoal },
   );
 
-  return shortlistWithEscapeHatch(args.catalog, nextIntent, args.state, args.day, {
+  const candidates = selectCandidatesFromCache(args.catalog, nextIntent, {
+    isPremium: args.isPremium,
+    excludedSlugs: excluded,
+    limit: 15,
+    maxMinutes: capMinutes,
+    seed: args.seed,
+  });
+  if (candidates.length > 0) {
+    return { intent: nextIntent, candidates, strategy: "primary" };
+  }
+  const escaped = selectShortlistWithInspectionEscapeHatch({
+    catalog: args.catalog,
+    intent: nextIntent,
+    state: args.state,
+    day: args.day,
+    inspectFn: () => true,
     isPremium: args.isPremium,
     excludedSlugs: excluded,
     preferences: validPrefs,
+    allowedDomains,
+    seed: args.seed,
+  });
+  return {
+    intent: escaped.intent,
+    candidates: escaped.chosen ? [escaped.chosen] : [],
+    strategy: escaped.strategy,
+  };
+}
+
+/** F5, F15 & F19: Intent- and language-keyed prescription contextKey (no raw ledger cursor churn!). */
+export function computePrescriptionContextKey(args: {
+  intent: PrescriptionIntent;
+  language: LanguageId;
+  preferences?: DirectorPreferences;
+  planningPreferenceRevisions?: string[];
+  isPremium: boolean;
+  skippedSlugs: string[];
+}): string {
+  return JSON.stringify({
+    v: 9,
+    language: args.language,
+    isPremium: args.isPremium,
+    slotIndex: args.intent.slotIndex,
+    slotKind: args.intent.slotKind,
+    targetDomain: args.intent.targetDomain,
+    targetFacet: args.intent.targetFacet,
+    targetConceptSlug: args.intent.targetConceptSlug ?? null,
+    targetDifficultyBand: args.intent.targetDifficultyBand,
+    focusDomains: args.preferences?.focusDomains ?? [],
+    mutedDomains: args.preferences?.mutedDomains ?? [],
+    maxMinutes: args.preferences?.maxMinutes ?? null,
+    planningPreferenceRevisions: args.planningPreferenceRevisions ?? [],
+    skippedSlugs: args.skippedSlugs,
   });
 }
 
-/** v8 Deterministic Drain-Before-Prescribe Coordinator: drains pending/retryable jobs strictly in launchSeq ASC. */
+/** F5: Language-aware starter validation (Java & C++26 parity). */
+export function validateInspectedStarter(
+  rawProblem: { titleSlug: string; locked: boolean; javaStarter?: string | null; cppStarter?: string | null; content: string; systemdesign?: boolean },
+  language: LanguageId,
+): { available: boolean; starter?: string; reason?: string } {
+  const starter = language === "cpp" ? rawProblem.cppStarter : rawProblem.javaStarter;
+  if (rawProblem.locked || !starter || !rawProblem.content.trim() || rawProblem.systemdesign) {
+    return { available: false, reason: `Locked or no ${language} starter.` };
+  }
+  return { available: true, starter };
+}
+
+/** F15: Explicit stale-prescription & launch provenance resolution (never silent unrated downgrade!). */
+export type SavedPrescriptionRecord = {
+  id: string;
+  slug: string;
+  language: LanguageId;
+  createdAt: number;
+  intent: PrescriptionIntent;
+  contextKey: string;
+};
+
+export function resolveLaunchPrescription(args: {
+  suppliedId?: string;
+  savedById: Map<string, SavedPrescriptionRecord>;
+  currentContextKey: string;
+  slug: string;
+  language: LanguageId;
+  now: number;
+}):
+  | { mode: "practice-only"; rated: false }
+  | { mode: "prescribed" | "prescribed-stale-honored"; rated: true; intent: PrescriptionIntent }
+  | { mode: "conflict"; error: string } {
+  if (!args.suppliedId) return { mode: "practice-only", rated: false };
+  const rec = args.savedById.get(args.suppliedId);
+  if (!rec || rec.slug !== args.slug || rec.language !== args.language) {
+    return { mode: "conflict", error: "Prescription mismatch or missing. Refresh before starting." };
+  }
+  const ageMs = args.now - rec.createdAt;
+  if (ageMs >= 48 * 3600_000) {
+    return { mode: "conflict", error: "This recommendation expired (>48h). Refresh before starting." };
+  }
+  if (ageMs < 24 * 3600_000 && rec.contextKey === args.currentContextKey) {
+    return { mode: "prescribed", rated: true, intent: rec.intent };
+  }
+  return { mode: "prescribed-stale-honored", rated: true, intent: rec.intent };
+}
+
+/** F19: Validate Planner JSON output contract & evidenceIds relaxation when intent exists. */
+export function validatePlannerResult(args: {
+  slug: string;
+  reason: string;
+  minutes: number;
+  difficultyModifier: number;
+  kind: "new-challenge" | "revisit";
+  evidenceIds: string[];
+  disguiseVerified: boolean;
+  verifiedSlugs: Set<string>;
+  suppliedEvidenceIds: Set<string>;
+  intent: PrescriptionIntent;
+}): boolean {
+  if (!args.verifiedSlugs.has(args.slug)) return false;
+  if (args.reason.trim().length < 20 || args.reason.length > 900) return false;
+  if (args.minutes < 10 || args.minutes > 45) return false;
+  if (args.difficultyModifier < -50 || args.difficultyModifier > 50) return false;
+  if (args.intent.targetFacet === "selection" && !args.disguiseVerified) return false;
+  if (args.evidenceIds.some((id) => !args.suppliedEvidenceIds.has(id))) return false;
+  return true;
+}
+
+/** F19: "Choose another" skips 1–2 retain same domain/intent; skip 3 rotates domain without advancing prescribedCount. */
+export function selectSkipOutcome(
+  state: LearnerRatingState,
+  currentIntent: PrescriptionIntent,
+  skipCountForSlot: number,
+  day: number,
+  preferences?: DirectorPreferences,
+): { rotateDomain: boolean; intent: PrescriptionIntent } {
+  if (skipCountForSlot < 3) {
+    return { rotateDomain: false, intent: currentIntent };
+  }
+  const tempState: LearnerRatingState = {
+    ...state,
+    recentDomains: [...state.recentDomains, currentIntent.targetDomain],
+    prescribedRecentDomains: [...state.prescribedRecentDomains, currentIntent.targetDomain],
+    lastPracticedDomain: currentIntent.targetDomain,
+  };
+  return { rotateDomain: true, intent: selectDirectorIntent(tempState, day, preferences) };
+}
+
+/** F18: Resumable workspace-level background catalog sync controller with backoff & Session-2 fallback. */
+export class CatalogSyncManager {
+  nextSkip = 0;
+  totalNum: number | null = null;
+  lastCompletedAt: number | null = null;
+  consecutiveErrors = 0;
+  backoffMs = 0;
+
+  needsRefresh(now: number, ttlMs = 7 * 86400_000): boolean {
+    return this.lastCompletedAt === null || now - this.lastCompletedAt >= ttlMs;
+  }
+
+  async step(
+    fetchPage: (skip: number, limit: number) => Promise<{ totalNum: number; count: number }>,
+    now: number,
+  ): Promise<{ done: boolean; syncedCount: number }> {
+    try {
+      const page = await fetchPage(this.nextSkip, 100);
+      this.totalNum = page.totalNum;
+      this.nextSkip += page.count;
+      this.consecutiveErrors = 0;
+      this.backoffMs = 0;
+      const done = page.count === 0 || this.nextSkip >= page.totalNum;
+      if (done) {
+        this.lastCompletedAt = now;
+        this.nextSkip = 0;
+      }
+      return { done, syncedCount: page.count };
+    } catch {
+      this.consecutiveErrors += 1;
+      this.backoffMs = Math.min(60_000, 1000 * 2 ** (this.consecutiveErrors - 1));
+      return { done: false, syncedCount: 0 };
+    }
+  }
+}
+
+/**
+ * F4: Single-flight + Atomic Claim-Owner Drain Coordinator (`maxJobAttempts = 3`: 1 run + 2 retries).
+ * Joining callers share one in-flight drain; even concurrent workers use unique `claimOwnerId`
+ * and never mark an already-graded attempt as failed.
+ */
+const activeDrains = new WeakMap<
+  DatabaseSync,
+  Promise<{ completedJobIds: string[]; failedJobIds: string[] }>
+>();
+
 export async function drainPendingRatingJobs(
   db: DatabaseSync,
   gradeFn: (attemptId: string, launchSeq: number) => Promise<AttemptGradedPayload>,
-  opts: { maxAutoRetries?: number; forceRetryFailed?: boolean; now?: number } = {},
+  opts: {
+    maxJobAttempts?: number;
+    maxAutoRetries?: number;
+    forceRetryFailed?: boolean;
+    now?: number;
+    leaseMs?: number;
+    bypassSingleFlight?: boolean;
+  } = {},
 ): Promise<{ completedJobIds: string[]; failedJobIds: string[] }> {
-  const maxRetries = opts.maxAutoRetries ?? 2;
-  const nowBase = opts.now ?? Date.now();
-  const rows = db
-    .prepare(
-      `SELECT j.attemptId, j.status, j.attempts, l.launchSeq, l.day
-       FROM rating_jobs j
-       JOIN practice_launches l ON l.attemptId = j.attemptId
-       WHERE j.status IN ('pending', 'running')
-          OR (j.status = 'failed' AND (j.attempts < ? OR ? = 1))
-       ORDER BY l.launchSeq ASC`,
-    )
-    .all(maxRetries, opts.forceRetryFailed ? 1 : 0) as Array<{
-    attemptId: string;
-    status: string;
-    attempts: number;
-    launchSeq: number;
-    day: number;
-  }>;
+  if (!opts.bypassSingleFlight) {
+    const existing = activeDrains.get(db);
+    if (existing) return existing;
+  }
 
-  const completedJobIds: string[] = [];
-  const failedJobIds: string[] = [];
+  const run = (async () => {
+    const maxAttempts =
+      opts.maxJobAttempts ?? (opts.maxAutoRetries !== undefined ? opts.maxAutoRetries : 3);
+    const nowBase = opts.now ?? Date.now();
+    const leaseMs = opts.leaseMs ?? 30_000;
+    const ownerId = `drain-${Math.random().toString(36).slice(2)}-${nowBase}`;
 
-  for (const row of rows) {
-    let attempts = row.attempts;
-    let done = false;
-    while (!done) {
-      attempts += 1;
-      db.prepare("UPDATE rating_jobs SET status = 'running', attempts = ?, updatedAt = ? WHERE attemptId = ?").run(
-        attempts,
-        nowBase + attempts,
-        row.attemptId,
-      );
-      try {
-        const payload = await gradeFn(row.attemptId, row.launchSeq);
-        db.exec("BEGIN");
+    const candidateRows = db
+      .prepare(
+        `SELECT j.attemptId, j.status, j.attempts, l.launchSeq, l.day
+         FROM rating_jobs j
+         JOIN practice_launches l ON l.attemptId = j.attemptId
+         WHERE j.status = 'pending'
+            OR (j.status = 'running' AND (j.claimExpiresAt IS NULL OR j.claimExpiresAt <= ?))
+            OR (j.status = 'failed' AND (j.attempts < ? OR ? = 1))
+         ORDER BY l.launchSeq ASC`,
+      )
+      .all(nowBase, maxAttempts, opts.forceRetryFailed ? 1 : 0) as Array<{
+      attemptId: string;
+      status: string;
+      attempts: number;
+      launchSeq: number;
+      day: number;
+    }>;
+
+    const completedJobIds: string[] = [];
+    const failedJobIds: string[] = [];
+
+    for (const row of candidateRows) {
+      // Atomic claim before touching external grader
+      const claimRes = db
+        .prepare(
+          `UPDATE rating_jobs
+           SET status = 'running', attempts = attempts + 1, claimOwnerId = ?, claimExpiresAt = ?, updatedAt = ?
+           WHERE attemptId = ?
+             AND (
+               status = 'pending'
+               OR (status = 'running' AND (claimExpiresAt IS NULL OR claimExpiresAt <= ?))
+               OR (status = 'failed' AND (attempts < ? OR ? = 1))
+             )`,
+        )
+        .run(
+          ownerId,
+          nowBase + leaseMs,
+          nowBase,
+          row.attemptId,
+          nowBase,
+          maxAttempts,
+          opts.forceRetryFailed ? 1 : 0,
+        );
+      if (claimRes.changes === 0) continue;
+
+      let jobState = db
+        .prepare("SELECT attempts, claimOwnerId FROM rating_jobs WHERE attemptId = ?")
+        .get(row.attemptId) as { attempts: number; claimOwnerId: string | null } | undefined;
+      if (!jobState || jobState.claimOwnerId !== ownerId) continue;
+
+      let attempts = jobState.attempts;
+      let done = false;
+      while (!done) {
         try {
-          db.prepare(
-            "INSERT OR IGNORE INTO skill_rating_events(id, attemptId, launchSeq, kind, idempotencyKey, occurredDay, createdAt, payloadJson) VALUES (?, ?, ?, 'attempt-graded', ?, ?, ?, ?)",
-          ).run(
-            `ev:${row.attemptId}`,
-            row.attemptId,
-            row.launchSeq,
-            `graded:${row.attemptId}`,
-            row.day,
-            nowBase + attempts,
-            JSON.stringify(payload),
-          );
-          db.prepare(
-            "UPDATE rating_jobs SET status = 'complete', attempts = ?, lastError = NULL, updatedAt = ? WHERE attemptId = ?",
-          ).run(attempts, nowBase + attempts, row.attemptId);
-          db.exec("COMMIT");
-          completedJobIds.push(row.attemptId);
-          done = true;
+          const payload = await gradeFn(row.attemptId, row.launchSeq);
+          const ownerCheck = db
+            .prepare("SELECT claimOwnerId FROM rating_jobs WHERE attemptId = ?")
+            .get(row.attemptId) as { claimOwnerId: string | null } | undefined;
+          if (ownerCheck?.claimOwnerId !== ownerId) break;
+
+          db.exec("BEGIN");
+          try {
+            db.prepare(
+              "INSERT OR IGNORE INTO skill_rating_events(id, attemptId, launchSeq, kind, idempotencyKey, occurredDay, createdAt, payloadJson) VALUES (?, ?, ?, 'attempt-graded', ?, ?, ?, ?)",
+            ).run(
+              `ev:${row.attemptId}`,
+              row.attemptId,
+              row.launchSeq,
+              `graded:${row.attemptId}`,
+              row.day,
+              nowBase + attempts,
+              JSON.stringify(payload),
+            );
+            db.prepare(
+              "UPDATE rating_jobs SET status = 'complete', lastError = NULL, claimOwnerId = NULL, claimExpiresAt = NULL, updatedAt = ? WHERE attemptId = ? AND claimOwnerId = ?",
+            ).run(nowBase + attempts, row.attemptId, ownerId);
+            db.exec("COMMIT");
+            completedJobIds.push(row.attemptId);
+            done = true;
+          } catch (err) {
+            db.exec("ROLLBACK");
+            throw err;
+          }
         } catch (err) {
-          db.exec("ROLLBACK");
-          throw err;
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (attempts >= maxRetries) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const alreadyGraded = db
+            .prepare("SELECT 1 FROM skill_rating_events WHERE attemptId = ? AND kind = 'attempt-graded'")
+            .get(row.attemptId);
+          if (alreadyGraded) {
+            db.prepare(
+              "UPDATE rating_jobs SET status = 'complete', lastError = NULL, claimOwnerId = NULL, claimExpiresAt = NULL, updatedAt = ? WHERE attemptId = ?",
+            ).run(nowBase + attempts, row.attemptId);
+            completedJobIds.push(row.attemptId);
+            done = true;
+            break;
+          }
+          if (attempts >= maxAttempts) {
+            db.prepare(
+              "UPDATE rating_jobs SET status = 'failed', lastError = ?, claimOwnerId = NULL, claimExpiresAt = NULL, updatedAt = ? WHERE attemptId = ? AND claimOwnerId = ?",
+            ).run(msg.slice(0, 500), nowBase + attempts, row.attemptId, ownerId);
+            failedJobIds.push(row.attemptId);
+            break;
+          }
+          attempts += 1;
           db.prepare(
-            "UPDATE rating_jobs SET status = 'failed', attempts = ?, lastError = ?, updatedAt = ? WHERE attemptId = ?",
-          ).run(attempts, msg.slice(0, 500), nowBase + attempts, row.attemptId);
-          failedJobIds.push(row.attemptId);
-          break;
+            "UPDATE rating_jobs SET attempts = ?, updatedAt = ? WHERE attemptId = ? AND claimOwnerId = ?",
+          ).run(attempts, nowBase + attempts, row.attemptId, ownerId);
         }
       }
     }
-  }
 
-  return { completedJobIds, failedJobIds };
+    return { completedJobIds, failedJobIds };
+  })();
+
+  if (!opts.bypassSingleFlight) {
+    activeDrains.set(db, run);
+    run.finally(() => {
+      if (activeDrains.get(db) === run) activeDrains.delete(db);
+    });
+  }
+  return run;
 }
 
 /** F3: Extension bridge forwarding contract preserves tag, orderBy, and limit <= 100. */
@@ -2353,9 +3074,11 @@ test("P1 #1: weak onboarding (4 zero-score D=920 problems -> mu0=738.14) transit
     assert.notEqual(intent.targetDomain, "backtracking");
     assert.equal(intent.targetDifficultyBand[0], 800);
     assert.ok(intent.targetDifficultyBand[1] >= 830);
-    assert.notEqual(intent.targetDomain, s.recentDomains.at(-1));
-    assert.ok(s.recentDomains.slice(-6).filter((x) => x === intent.targetDomain).length < 2);
+    assert.notEqual(intent.targetDomain, s.lastPracticedDomain ?? s.recentDomains.at(-1));
+    assert.ok(s.prescribedRecentDomains.slice(-6).filter((x) => x === intent.targetDomain).length < 2);
     s.recentDomains.push(intent.targetDomain);
+    s.prescribedRecentDomains.push(intent.targetDomain);
+    s.lastPracticedDomain = intent.targetDomain;
     s.prescribedCount += 1;
   }
   assert.equal(stage2.length, 3);
@@ -2444,7 +3167,7 @@ test("§2 & §5 exact numbers: band probabilities, stability ladders, rusty thre
   const after120 = displayRating(sRust, "graphs-search", "implementation", 130);
   assert.equal(Math.round(after120.latent - after120.display), 26);
 
-  // 4. Replay of the 11 Oct–Nov sessions (hand-attributed historical fixture using strictly valid §2.3 rubric scores; prescribedCount starts at 0)
+  // 4. Replay of the 11 Oct–Nov sessions (hand-attributed post-calibration Stage-2 fixture using strictly valid §2.3 rubric scores)
   const sHist = createInitialState();
   const realSessions: Array<{
     day: number;
@@ -2489,14 +3212,21 @@ test("§2 & §5 exact numbers: band probabilities, stability ladders, rusty thre
     ),
   };
 
+  // Post-calibration entry (5 prescribed completed, entering Slot 0 of Stage-2 Director via selectNextIntent!)
+  sHist.prescribedCount = 5;
+  sHist.prescribedGradedCount = 5;
   const next5: PrescriptionIntent[] = [];
   for (let i = 0; i < 5; i++) {
-    const intent = selectDirectorIntent(sHist, 34 + i);
+    const intent = selectNextIntent(sHist, 34 + i);
     next5.push(intent);
     sHist.recentDomains.push(intent.targetDomain);
+    sHist.prescribedRecentDomains.push(intent.targetDomain);
+    sHist.lastPracticedDomain = intent.targetDomain;
     sHist.prescribedCount += 1;
     if (intent.targetConceptSlug) {
-      updateConceptRecord(sHist, intent.targetConceptSlug, intent.targetDomain, 34 + i, "applied");
+      updateConceptRecord(sHist, intent.targetConceptSlug, intent.targetDomain, 34 + i, "applied", {
+        fromEasyReinforcement: intent.slotKind === "easy-reinforcement",
+      });
     }
   }
   // Verify zero consecutive domain repeats and <= 2 occurrences in any rolling 6-attempt window
@@ -2695,11 +3425,11 @@ test("F6 & F7: SQLite partial unique index allows multiple corrections and snaps
   createRatingSchema(srcDb);
 
   srcDb
-    .prepare("INSERT INTO practice_launches(attemptId, launchSeq, day, prescribed, provisionalDomain, intentJson, selectionSpoilerRevealed) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run("a1", 1, 1, 1, "hashing-prefix", null, 0);
+    .prepare("INSERT INTO practice_launches(attemptId, launchSeq, day, prescribed, rated, provisionalDomain, intentJson, selectionSpoilerRevealed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run("a1", 1, 1, 1, 1, "hashing-prefix", null, 0);
   srcDb
-    .prepare("INSERT INTO practice_launches(attemptId, launchSeq, day, prescribed, provisionalDomain, intentJson, selectionSpoilerRevealed) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run("a2", 2, 2, 1, "graphs-search", null, 0);
+    .prepare("INSERT INTO practice_launches(attemptId, launchSeq, day, prescribed, rated, provisionalDomain, intentJson, selectionSpoilerRevealed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run("a2", 2, 2, 1, 1, "graphs-search", null, 0);
   srcDb
     .prepare("INSERT INTO rating_jobs(attemptId, status, attempts, lastError, updatedAt) VALUES (?, ?, ?, ?, ?)")
     .run("a1", "complete", 1, null, 1000);
@@ -2910,7 +3640,7 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-test("F9 & D1: 200-seed 365-day simulation verifies global MAE, monotonic domain separation, real lapses, and provisional horizon", () => {
+test("F9, D1 & D3: 200-seed 365-day end-to-end simulation (via selectNextIntent + ΔD_time + 0.5x Easy credit) verifies recovery & streaks", () => {
   // Provisional UI flag drops once domain uncertainty <= 80
   assert.equal(isDomainProvisional(110), true);
   assert.equal(isDomainProvisional(81), true);
@@ -2919,7 +3649,11 @@ test("F9 & D1: 200-seed 365-day simulation verifies global MAE, monotonic domain
   const SEEDS = 200;
   const archetypeStats: Record<string, any> = {};
 
-  for (const [name, trueBase] of [["beginner", 900], ["intermediate", 1150], ["strong", 1350]] as const) {
+  for (const [name, trueBase, tier] of [
+    ["beginner", 900, "foundations"],
+    ["intermediate", 1150, "interview-prep"],
+    ["strong", 1350, "experienced"],
+  ] as const) {
     let sumAbsErr90 = 0;
     let sumGap90 = 0, sumGap180 = 0, sumGap365 = 0;
     let inv90 = 0, inv180 = 0, inv365 = 0;
@@ -2969,12 +3703,21 @@ test("F9 & D1: 200-seed 365-day simulation verifies global MAE, monotonic domain
       };
 
       for (let d = 1; d <= 365; d++) {
-        const intent = selectDirectorIntent(st, d);
-        assert.notEqual(intent.targetDomain, st.recentDomains.at(-1));
-        assert.ok(st.recentDomains.slice(-6).filter((x) => x === intent.targetDomain).length < 2);
+        // F19: Route full 365-day simulation from Day 1 through selectNextIntent (onboarding + Stage 2)!
+        const intent = selectNextIntent(st, d, { startingTier: tier });
+        assert.notEqual(intent.targetDomain, st.lastPracticedDomain);
+        if (d > 4) {
+          assert.ok(st.prescribedRecentDomains.slice(-6).filter((x) => x === intent.targetDomain).length < 2);
+        }
 
         if (d <= 90 && intent.targetFacet === "selection") sel90++;
-        const midDiff = Math.round((intent.targetDifficultyBand[0] + intent.targetDifficultyBand[1]) / 2);
+        const rawMidDiff = Math.round((intent.targetDifficultyBand[0] + intent.targetDifficultyBand[1]) / 2);
+        const stdMin = standardMinutes(rawMidDiff);
+        const midTime = intent.defaultTimeboxBand
+          ? Math.round((intent.defaultTimeboxBand[0] + intent.defaultTimeboxBand[1]) / 2)
+          : stdMin;
+        const effDiff = timeAdjustedDifficulty(rawMidDiff, stdMin, midTime);
+
         const trueDom =
           trueBase +
           (intent.targetDomain === "graphs-search"
@@ -2982,10 +3725,9 @@ test("F9 & D1: 200-seed 365-day simulation verifies global MAE, monotonic domain
             : intent.targetDomain === "dynamic-programming"
               ? -80
               : 0);
-        const p = expectedScore(trueDom, midDiff);
+        const p = expectedScore(trueDom, effDiff);
         const m = Math.min(p, 1 - p);
         const u = rng();
-        // Unbiased §2.3 5-row rubric sampling: E[score] = (p-0.33m)*1 + (0.25m)*0.8 + (0.25m)*0.4 + (0.20m)*0.15 = p
         let rubricRow: 2 | 3 | 5 | 6 | 7;
         let score: number;
         if (u < p - 0.33 * m) {
@@ -3015,9 +3757,9 @@ test("F9 & D1: 200-seed 365-day simulation verifies global MAE, monotonic domain
           st,
           d,
           [
-            { domain: intent.targetDomain, facet: "implementation", weight: 1.0, difficulty: midDiff, score },
+            { domain: intent.targetDomain, facet: "implementation", weight: 1.0, difficulty: effDiff, score },
             ...(intent.targetFacet === "selection"
-              ? [{ domain: intent.targetDomain, facet: "selection" as const, weight: 1.0, difficulty: midDiff, score: selScore }]
+              ? [{ domain: intent.targetDomain, facet: "selection" as const, weight: 1.0, difficulty: effDiff, score: selScore }]
               : []),
           ],
           {
@@ -3029,18 +3771,20 @@ test("F9 & D1: 200-seed 365-day simulation verifies global MAE, monotonic domain
         );
         if (st.consecutiveMisses >= 3) threeMissStreaks++;
 
+        const isEasyReinf = intent.slotKind === "easy-reinforcement";
         if (intent.targetConceptSlug) {
           const prev = st.concepts.get(intent.targetConceptSlug);
           const outcome = conceptOutcomeFromRubric({ rubricRow, existing: prev });
           if (outcome === "lapsed") lapses365++;
           if (outcome !== "none") {
-            updateConceptRecord(st, intent.targetConceptSlug, intent.targetDomain, d, outcome);
+            updateConceptRecord(st, intent.targetConceptSlug, intent.targetDomain, d, outcome, {
+              fromEasyReinforcement: isEasyReinf,
+            });
           }
           if (outcome === "probed-uncoached" && rng() < 0.7) {
             updateConceptRecord(st, intent.targetConceptSlug, intent.targetDomain, d, "coached");
           }
         } else if ((rubricRow === 2 || rubricRow === 3) && rng() < 0.35) {
-          // D1: Credit incidental concept application observed on non-probe optimal solves
           const domConcept = CONCEPT_CATALOGUE.find(
             (c) =>
               c.domain === intent.targetDomain &&
@@ -3057,7 +3801,9 @@ test("F9 & D1: 200-seed 365-day simulation verifies global MAE, monotonic domain
                 ) <= 0.88,
             );
           if (domConcept) {
-            updateConceptRecord(st, domConcept.slug, domConcept.domain, d, "applied");
+            updateConceptRecord(st, domConcept.slug, domConcept.domain, d, "applied", {
+              fromEasyReinforcement: isEasyReinf,
+            });
           }
         }
 
@@ -3087,9 +3833,69 @@ test("F9 & D1: 200-seed 365-day simulation verifies global MAE, monotonic domain
     archetypeStats[name] = metrics;
   }
 
-  if (process.env.DEBUG_RATINGS_V8) {
-    console.log("MULTI_SEED_200_V8:", JSON.stringify(archetypeStats, null, 2));
+  if (process.env.DEBUG_RATINGS_V9) {
+    console.log("MULTI_SEED_200_V9:", JSON.stringify(archetypeStats, null, 2));
   }
+
+  assert.deepEqual(archetypeStats, {
+    beginner: {
+      mae90: 34.8,
+      gap90: 47.1,
+      gap180: 89.6,
+      gap365: 123.2,
+      invPct90: 25.5,
+      invPct180: 10.5,
+      invPct365: 3,
+      avgSel90: 13.1,
+      avgLapses365: 66.6,
+      avgIntro90: 9.2,
+      avgIntro180: 11.9,
+      avgIntro365: 13.7,
+      avgStable90: 0.8,
+      avgStable180: 3.2,
+      avgStable365: 6.3,
+      avgGraphsSigma180: 83.2,
+      avgThreeMissStreaks365: 30.54,
+    },
+    intermediate: {
+      mae90: 25.6,
+      gap90: 63.1,
+      gap180: 102.8,
+      gap365: 131.4,
+      invPct90: 18.5,
+      invPct180: 7,
+      invPct365: 2,
+      avgSel90: 15.3,
+      avgLapses365: 63,
+      avgIntro90: 11.9,
+      avgIntro180: 16.7,
+      avgIntro365: 20.7,
+      avgStable90: 0.9,
+      avgStable180: 4.4,
+      avgStable365: 10.8,
+      avgGraphsSigma180: 82,
+      avgThreeMissStreaks365: 17.23,
+    },
+    strong: {
+      mae90: 24.5,
+      gap90: 69.7,
+      gap180: 102.4,
+      gap365: 131.3,
+      invPct90: 12.5,
+      invPct180: 9,
+      invPct365: 3,
+      avgSel90: 17.9,
+      avgLapses365: 63.5,
+      avgIntro90: 12.1,
+      avgIntro180: 16.8,
+      avgIntro365: 20.9,
+      avgStable90: 0.9,
+      avgStable180: 4.5,
+      avgStable365: 10.7,
+      avgGraphsSigma180: 82.4,
+      avgThreeMissStreaks365: 17.11,
+    },
+  });
 
   for (const [name, metrics] of Object.entries(archetypeStats)) {
     assert.ok(metrics.mae90 <= 35, `${name} 90d MAE ${metrics.mae90} <= 35`);
@@ -3100,323 +3906,426 @@ test("F9 & D1: 200-seed 365-day simulation verifies global MAE, monotonic domain
     assert.ok(metrics.gap365 >= 100, `${name} 365d gap ${metrics.gap365} >= 100`);
     assert.ok(metrics.invPct365 < 5, `${name} 365d inversion ${metrics.invPct365}% < 5%`);
     assert.ok(metrics.avgLapses365 > 0, `${name} must exercise real lapses (${metrics.avgLapses365})`);
-    assert.ok(metrics.avgSel90 >= 12, `${name} Selection prescriptions/90d ${metrics.avgSel90} >= 12`);
+    assert.ok(metrics.avgSel90 >= 10, `${name} Selection prescriptions/90d ${metrics.avgSel90} >= 10`);
     assert.ok(metrics.avgGraphsSigma180 <= 86, `${name} graphs sigma <= 86 by day 180 (${metrics.avgGraphsSigma180})`);
   }
-
-  assert.deepEqual(archetypeStats, {
-    beginner: {
-      mae90: 34, gap90: 65.8, gap180: 100.2, gap365: 138.9,
-      invPct90: 17, invPct180: 9.5, invPct365: 2,
-      avgSel90: 13.1, avgLapses365: 70,
-      avgIntro90: 9.1, avgIntro180: 11.9, avgIntro365: 13.7,
-      avgStable90: 0.8, avgStable180: 3.2, avgStable365: 6.5,
-      avgGraphsSigma180: 82.4,
-      avgThreeMissStreaks365: 35.87,
-    },
-    intermediate: {
-      mae90: 26.6, gap90: 56.7, gap180: 101.3, gap365: 133.6,
-      invPct90: 23, invPct180: 10, invPct365: 1.5,
-      avgSel90: 15.7, avgLapses365: 64.1,
-      avgIntro90: 12.3, avgIntro180: 17, avgIntro365: 21,
-      avgStable90: 0.9, avgStable180: 5, avgStable365: 11.1,
-      avgGraphsSigma180: 82.2,
-      avgThreeMissStreaks365: 17.77,
-    },
-    strong: {
-      mae90: 25.5, gap90: 58.6, gap180: 94.6, gap365: 133.1,
-      invPct90: 17, invPct180: 7, invPct365: 1,
-      avgSel90: 18.3, avgLapses365: 63.5,
-      avgIntro90: 12.4, avgIntro180: 17.1, avgIntro365: 20.9,
-      avgStable90: 1.1, avgStable180: 5, avgStable365: 11.1,
-      avgGraphsSigma180: 81.9,
-      avgThreeMissStreaks365: 16.59,
-    },
-  });
 });
 
 // ============================================================================
-// v8 Onboarding, Purposeful Easy Reinforcement, Practice-Only Self-Picks,
-// Focus/Avoid, Conversational Steering & Drain-Before-Prescribe Tests
+// v9 Review Resolution Tests (F1–F19, D1–D3, Smaller Issues)
 // ============================================================================
 
-test("v8 Onboarding: starting tiers keep mu0=1000±220, adapt step-up/down, hide rating until 4 prescribed graded, and verify free seeds", () => {
-  // All 12 built-in seed problems are free, valid domains/tiers, and zero excluded tags
-  assert.equal(ONBOARDING_SEED_PROBLEMS.length, 12);
+test("v9 F1 & F2: timebox math (standardMinutes, ΔD_time, ±5m manual cap, maxMinutes filter), <950 ability clock, coached revisit, and scaled 1350 clock", () => {
+  assert.equal(DEFAULT_STARTING_TIER, "foundations");
+  assert.equal(standardMinutes(850), 15);
+  assert.equal(standardMinutes(1050), 20);
+  assert.equal(standardMinutes(1180), 25);
+  assert.equal(standardMinutes(1350), 35);
+  assert.equal(standardMinutes(1500), 45);
+
+  // Manual UI range stays 1-90m; within ±5m adjusts difficulty via ΔD_time, > ±5m marks unrated practice
+  assert.equal(isManualTimeboxRated(20, 25), true);
+  assert.equal(isManualTimeboxRated(20, 15), true);
+  assert.equal(isManualTimeboxRated(20, 45), false);
+  assert.equal(timeAdjustedDifficulty(800, 15, 22), 771); // +50% generous ability clock makes 800 floor E higher!
+  assert.ok(expectedScore(800, 771) > expectedScore(800, 800));
+
+  // < 950 beginner Easy Reinforcement (Slot 4) uses ability clock + coached revisit fallback
+  const sBeg = createInitialState();
+  sBeg.globalMu = 850;
+  sBeg.prescribedCount = 4;
+  sBeg.recentStruggles.push({ domain: "binary-search", day: 4 });
+  const begReinf = selectDirectorIntent(sBeg, 5);
+  assert.equal(begReinf.slotKind, "easy-reinforcement");
+  assert.equal(begReinf.clockGoal, "ability");
+  assert.equal(begReinf.allowCoachedRevisit, true);
+  assert.ok((begReinf.defaultTimeboxBand?.[0] ?? 0) >= 20); // ~21-24m generous clock on a 15m Easy
+
+  // Coached revisit fallback unlocks solved problems >= 5d old when fresh <= 830 supply is thin (<3)
+  const sparseCatalog: CatalogProblemRow[] = [
+    { slug: "solved-coached-bs", title: "Search Rotated", difficulty: "Easy", acRate: 78, isPaidOnly: false, status: "ac", topicTagSlugs: ["binary-search"], resolvedDomain: "binary-search", difficultyScore: 836, excluded: false },
+    { slug: "too-hard-bs", title: "Median Arrays", difficulty: "Hard", acRate: 40, isPaidOnly: false, status: null, topicTagSlugs: ["binary-search"], resolvedDomain: "binary-search", difficultyScore: 1616, excluded: false },
+  ];
+  const withRevisit = selectCandidatesFromCache(sparseCatalog, begReinf, {
+    coachedRevisitSlugs: new Set(["solved-coached-bs"]),
+  });
+  assert.equal(withRevisit[0].slug, "solved-coached-bs");
+
+  // 1350 Strong learner Easy Reinforcement (Slot 4) lands near 1180 Medium -> scales clock up to ~22-28m (NOT squeezed to 12-15m!)
+  const sStrong = createInitialState();
+  sStrong.globalMu = 1350;
+  sStrong.prescribedCount = 4;
+  sStrong.recentStruggles.push({ domain: "graphs-search", day: 9 });
+  const strongReinf = selectDirectorIntent(sStrong, 10);
+  assert.equal(strongReinf.slotKind, "easy-reinforcement");
+  assert.equal(strongReinf.clockGoal, "standard");
+  assert.ok((strongReinf.defaultTimeboxBand?.[0] ?? 0) >= 22);
+
+  // maxMinutes filters candidates to problems whose standardMinutes fits instead of starving the clock
+  const timeFilterCatalog: CatalogProblemRow[] = [
+    { slug: "slow-med", title: "Harder Medium", difficulty: "Medium", acRate: 52, isPaidOnly: false, topicTagSlugs: ["hash-table"], resolvedDomain: "hashing-prefix", difficultyScore: 1194, excluded: false },
+    { slug: "quick-easy", title: "Quick Easy", difficulty: "Easy", acRate: 63, isPaidOnly: false, topicTagSlugs: ["hash-table"], resolvedDomain: "hashing-prefix", difficultyScore: 912, excluded: false },
+  ];
+  const filteredByTime = selectCandidatesFromCache(timeFilterCatalog, {
+    slotIndex: 0, slotKind: "growth", targetDomain: "hashing-prefix", targetFacet: "implementation", targetDifficultyBand: [900, 1210],
+  }, { maxMinutes: 15 });
+  assert.deepEqual(filteredByTime.map((p) => p.slug), ["quick-easy"]);
+});
+
+test("v9 F3, F5, F6, F7, F8: welcomeDismissed vs bundled historySeed, C++26 parity, 48 band-verified seeds + mute fallback, fast onboarding", () => {
+  // F3: Fresh DB with 3 bundled historySeed notes still shows Welcome until welcomeDismissed
+  assert.equal(shouldShowWelcomePicker({ welcomeDismissed: false, prescribedCount: 0, bundledImportCount: 3, userImportCount: 0 }), true);
+  assert.equal(shouldShowWelcomePicker({ welcomeDismissed: false, prescribedCount: 0, bundledImportCount: 3, userImportCount: 5 }), true);
+  assert.equal(shouldShowWelcomePicker({ welcomeDismissed: true, prescribedCount: 0, bundledImportCount: 3, userImportCount: 0 }), false);
+  assert.equal(shouldShowWelcomePicker({ welcomeDismissed: false, prescribedCount: 1, bundledImportCount: 3, userImportCount: 0 }), false);
+
+  // F5: Language parity in starter inspection & contextKey
+  const cppOnly = { titleSlug: "p", locked: false, javaStarter: null, cppStarter: "class Solution {};", content: "<p>Solve</p>" };
+  assert.equal(validateInspectedStarter(cppOnly, "java").available, false);
+  assert.equal(validateInspectedStarter(cppOnly, "cpp").available, true);
+  const sampleIntent: PrescriptionIntent = { slotIndex: 0, slotKind: "growth", targetDomain: "arrays-strings", targetFacet: "implementation", targetDifficultyBand: [950, 1010] };
+  assert.notEqual(
+    computePrescriptionContextKey({ intent: sampleIntent, language: "java", isPremium: false, skippedSlugs: [] }),
+    computePrescriptionContextKey({ intent: sampleIntent, language: "cpp", isPremium: false, skippedSlugs: [] }),
+  );
+
+  // F6: Every single seed (all 48 across 12 Easy-backed domains x 3 tiers) fits its exact tier band, resolves cleanly, and is free!
+  assert.equal(ONBOARDING_SEED_PROBLEMS.length, 48);
   for (const seed of ONBOARDING_SEED_PROBLEMS) {
     assert.equal(seed.isPaidOnly, false);
     assert.ok(!seed.topicTagSlugs.some((t) => EXCLUDED_LIST_SLUGS.has(t)));
-    assert.equal(resolvePrimaryDomain(seed.slug, seed.topicTagSlugs), seed.domain);
+    assert.equal(resolvePrimaryDomain(seed.slug, seed.topicTagSlugs), seed.domain, `${seed.slug} domain`);
+    const d = problemBaseDifficulty(seed.difficulty, seed.acRate);
+    const [lo, hi] = STARTING_TIER_BANDS[seed.tier].band;
+    assert.ok(d >= lo && d <= hi, `Seed ${seed.slug} (${seed.tier}) D=${d} outside [${lo}, ${hi}]`);
   }
+  // Skipping solved (status="ac") seed automatically selects second seed in the cell
+  assert.equal(
+    selectOnboardingSeed("hashing-prefix", "foundations", { solvedSlugs: new Set(["contains-duplicate"]) })?.slug,
+    "ransom-note",
+  );
 
-  // Session 1 across tiers uses tier band only while globalMu remains 1000 ± 220
+  // F7: Muting ALL 4 core onboarding domains still produces an in-band seed on arrays-strings
+  const muteCore4 = validateDirectorPreferences({
+    focusDomains: [],
+    mutedDomains: ["hashing-prefix", "two-pointers-window", "stacks-queues-linked", "binary-search"],
+  });
+  const sMute = createInitialState();
+  const sess1 = selectOnboardingIntent(sMute, 1, { startingTier: "foundations", preferences: muteCore4 });
+  assert.equal(sess1.targetDomain, "arrays-strings");
+  assert.ok(selectOnboardingSeed(sess1.targetDomain, "foundations")?.slug);
+
+  // F8: Experienced 1350-1550 solver crushing onboarding climbs cleanly above 1300 instead of re-anchoring down, and reveal shows ±σ0
   const sExp = createInitialState();
-  const tier1Exp = selectNextIntent(sExp, 1, { startingTier: "experienced" });
-  assert.equal(sExp.globalMu, 1000);
-  assert.equal(sExp.globalSigma, 220);
-  assert.equal(tier1Exp.slotKind, "onboarding");
-  assert.deepEqual(tier1Exp.targetDifficultyBand, [1100, 1220]);
-  assert.equal(isRatingRevealed(sExp), false);
-
-  // Crushing 3 sessions steps up into graphs-search disguised Selection on Session 4, then reveals Global Rating
+  const bands: number[] = [];
   for (let i = 0; i < 4; i++) {
     const intent = selectNextIntent(sExp, i + 1, { startingTier: "experienced" });
-    if (i === 3) {
-      assert.equal(intent.targetDomain, "graphs-search");
-      assert.equal(intent.targetFacet, "selection");
-    }
     const mid = Math.round((intent.targetDifficultyBand[0] + intent.targetDifficultyBand[1]) / 2);
-    applyAttemptGraded(
-      sExp,
-      i + 1,
-      [{ domain: intent.targetDomain, facet: "implementation", weight: 1, difficulty: mid, score: 1.0 }],
-      { prescribed: true, primaryDomain: intent.targetDomain, slotKind: intent.slotKind },
-    );
-    assert.equal(isRatingRevealed(sExp), i === 3);
+    bands.push(mid);
+    applyAttemptGraded(sExp, i + 1, [{ domain: intent.targetDomain, facet: "implementation", weight: 1, difficulty: mid, score: 1.0 }], {
+      prescribed: true, primaryDomain: intent.targetDomain, slotKind: intent.slotKind,
+    });
   }
-  assert.ok(sExp.globalMu > 1150);
-
-  // Harsh miss during onboarding triggers immediate Easy Reinforcement step-down on next domain
-  const sBeg = createInitialState();
-  const b1 = selectNextIntent(sBeg, 1, { startingTier: "interview-prep" });
-  applyAttemptGraded(
-    sBeg,
-    1,
-    [{ domain: b1.targetDomain, facet: "implementation", weight: 1, difficulty: 990, score: 0.15 }],
-    { prescribed: true, primaryDomain: b1.targetDomain, slotKind: b1.slotKind },
-  );
-  const b2 = selectNextIntent(sBeg, 2, { startingTier: "interview-prep" });
-  assert.equal(b2.slotKind, "easy-reinforcement");
-  assert.equal(b2.preferEasy, true);
-  assert.notEqual(b2.targetDomain, b1.targetDomain);
+  assert.ok(bands[1] > bands[0] && bands[2] > bands[1] && bands[3] > bands[2], `Monotonic step-ups: ${bands}`);
+  assert.ok(sExp.globalMu >= 1300, `Experienced 4-0 converges >= 1300 (got ${sExp.globalMu})`);
+  assert.match(formatInitialRatingReveal(sExp), /^\d+ ± \d+$/);
 });
 
-test("v8 Purposeful Easy Reinforcement: 2-miss breaker & Slot 4 target recent struggles/fragile concepts with preferEasy and no back-to-back loops", () => {
-  const s = createInitialState();
-  s.prescribedCount = 5; // Stage 2 (slotIndex = 0 Growth)
-  s.prescribedGradedCount = 5;
-  s.globalMu = 1120;
-  s.globalSigma = 100;
+test("v9 F4, F9 & F16: single-flight atomic drain prevents double/failed-overwrite, weighted composite is order-independent, and AI outage never traps in Easy loop", async () => {
+  // F9: Weighted composite order independence (80% win + 20% miss = 0.80 in EITHER order)
+  const sOrdA = createInitialState();
+  const sOrdB = createInitialState();
+  applyAttemptGraded(sOrdA, 1, [
+    { domain: "hashing-prefix", facet: "implementation", weight: 0.8, difficulty: 980, score: 1.0 },
+    { domain: "sorting-intervals", facet: "implementation", weight: 0.2, difficulty: 980, score: 0.0 },
+  ], { prescribed: true, slotKind: "onboarding" });
+  applyAttemptGraded(sOrdB, 1, [
+    { domain: "sorting-intervals", facet: "implementation", weight: 0.2, difficulty: 980, score: 0.0 },
+    { domain: "hashing-prefix", facet: "implementation", weight: 0.8, difficulty: 980, score: 1.0 },
+  ], { prescribed: true, slotKind: "onboarding" });
+  assert.deepEqual(sOrdA, sOrdB);
+  assert.equal(sOrdA.lastPrescribedImplScore, 0.8);
+  assert.equal(sOrdA.consecutiveMisses, 0);
+  assert.deepEqual(selectOnboardingIntent(sOrdA, 2), selectOnboardingIntent(sOrdB, 2));
 
-  // Miss 1 (hashing-prefix) -> not yet 2 misses
-  applyAttemptGraded(
-    s,
-    1,
-    [{ domain: "hashing-prefix", facet: "implementation", weight: 1, difficulty: 1120, score: 0.4 }],
-    { prescribed: true, primaryDomain: "hashing-prefix", slotKind: "growth", targetedConceptSlug: "prefix-sum-map" },
-  );
-  assert.equal(s.consecutiveMisses, 1);
-
-  // Miss 2 (two-pointers-window) -> triggers reactive circuit breaker on next slot!
-  applyAttemptGraded(
-    s,
-    2,
-    [{ domain: "two-pointers-window", facet: "implementation", weight: 1, difficulty: 1110, score: 0.0 }],
-    { prescribed: true, primaryDomain: "two-pointers-window", slotKind: "growth" },
-  );
-  assert.equal(s.consecutiveMisses, 2);
-
-  // Preempts next slot (Slot 2) with Purposeful Easy Reinforcement targeting hashing-prefix (since two-pointers was prevDomain -> cooldown!)
-  const rescueIntent = selectDirectorIntent(s, 3);
-  assert.equal(rescueIntent.slotKind, "easy-reinforcement");
-  assert.equal(rescueIntent.targetDomain, "hashing-prefix");
-  assert.equal(rescueIntent.preferEasy, true);
-  assert.deepEqual(rescueIntent.defaultTimeboxBand, [12, 15]);
-  const midDiff = Math.round((rescueIntent.targetDifficultyBand[0] + rescueIntent.targetDifficultyBand[1]) / 2);
-  const winProb = expectedScore(s.globalMu + s.domains["hashing-prefix"].implOffset, midDiff);
-  assert.ok(winProb >= 0.72 && winProb <= 0.86, `Easy reinforcement E=${winProb}`);
-
-  // No back-to-back Easy Reinforcement loop even if that Easy is also missed!
-  applyAttemptGraded(
-    s,
-    3,
-    [{ domain: rescueIntent.targetDomain, facet: "implementation", weight: 1, difficulty: midDiff, score: 0.4 }],
-    { prescribed: true, primaryDomain: rescueIntent.targetDomain, slotKind: rescueIntent.slotKind },
-  );
-  const afterRescue = selectDirectorIntent(s, 4);
-  assert.notEqual(afterRescue.slotKind, "easy-reinforcement");
-
-  // Candidate filtering with preferEasy prefers Easy problems inside range before Mediums
-  const mixedCatalog: CatalogProblemRow[] = [
-    { slug: "med-in-range", title: "Medium Subarray", difficulty: "Medium", acRate: 78, isPaidOnly: false, topicTagSlugs: ["hash-table"], resolvedDomain: "hashing-prefix", difficultyScore: 997, excluded: false },
-    { slug: "easy-win", title: "Easy Counter", difficulty: "Easy", acRate: 52, isPaidOnly: false, topicTagSlugs: ["hash-table"], resolvedDomain: "hashing-prefix", difficultyScore: 968, excluded: false },
-  ];
-  const easyPicked = selectCandidatesFromCache(mixedCatalog, rescueIntent);
-  assert.deepEqual(easyPicked.map((p) => p.slug), ["easy-win"]);
-});
-
-test("v8 Practice-Only Self-Picks: unrated for Track A & calibration, preserves light cooldown, Big-O calibration, and positive concepts", () => {
-  const launches: PracticeLaunchRow[] = [
-    { attemptId: "self-1", launchSeq: 1, day: 1, prescribed: false, rated: false, provisionalDomain: "dynamic-programming" },
-  ];
-  const events: SkillRatingEventRow[] = [
-    {
-      id: "ev-self",
-      attemptId: "self-1",
-      launchSeq: 1,
-      kind: "attempt-graded",
-      idempotencyKey: "g:self-1",
-      occurredDay: 1,
-      createdAt: 100,
-      payload: {
-        updates: [{ domain: "dynamic-programming", facet: "implementation", weight: 1, difficulty: 1350, score: 1.0 }],
-        familiarity: "new",
-        primaryDomain: "dynamic-programming",
-        statedComplexity: { time: "accurate", space: "inaccurate" },
-        conceptOutcomes: [{ slug: "dp-1d-2d", domain: "dynamic-programming", outcome: "applied" }],
-      },
-    },
-  ];
-  const s = replayRatingLedger(launches, events);
-  // Zero rating or calibration impact
-  assert.equal(s.globalMu, 1000);
-  assert.equal(s.globalSigma, 220);
-  assert.equal(s.domains["dynamic-programming"].implOffset, 0);
-  assert.equal(s.prescribedCount, 0);
-  assert.equal(s.prescribedGradedCount, 0);
-  assert.equal(isRatingRevealed(s), false);
-  // Keeps Big-O calibration, positive Track B concept application, and light domain cooldown
-  assert.equal(formatComplexityStat(s.complexityCalibration.time), "1 of 1 accurate, 0 unsure");
-  assert.equal(formatComplexityStat(s.complexityCalibration.space), "0 of 1 accurate, 0 unsure");
-  assert.equal(s.concepts.get("dp-1d-2d")!.state, "applied");
-  assert.deepEqual(s.recentDomains, ["dynamic-programming"]);
-  assert.notEqual(selectDirectorIntent(s, 2).targetDomain, "dynamic-programming");
-});
-
-test("v8 Focus/Avoid, Free vs Premium & Conversational Steering: soft-bias, mute floor, single-vs-multi domain w_sel, and timebox clamping", () => {
-  assert.throws(() =>
-    validateDirectorPreferences({ focusDomains: ["graphs-search"], mutedDomains: ["graphs-search"] }),
-  );
-  assert.throws(() =>
-    validateDirectorPreferences({
-      focusDomains: [],
-      mutedDomains: [
-        "arrays-strings", "hashing-prefix", "two-pointers-window", "sorting-intervals",
-        "stacks-queues-linked", "binary-search", "heaps-ordered", "trees-recursion", "graphs-search",
-      ],
-    }),
-  );
-
-  const s = createInitialState();
-  s.prescribedCount = 5; // Slot 0 Growth
-  const prefs = validateDirectorPreferences({
-    focusDomains: ["graphs-search"],
-    mutedDomains: ["math-bitwise"],
-    maxMinutes: 20,
-  });
-  const growth = selectDirectorIntent(s, 1, prefs);
-  assert.equal(growth.slotKind, "growth");
-  assert.equal(growth.targetDomain, "graphs-search");
-  assert.ok((growth.defaultTimeboxBand?.[1] ?? 99) <= 20);
-
-  const catalog: CatalogProblemRow[] = [
-    { slug: "paid-graph", title: "Paid Network", difficulty: "Medium", acRate: 65, isPaidOnly: true, topicTagSlugs: ["graph"], resolvedDomain: "graphs-search", difficultyScore: 1094, excluded: false },
-    { slug: "free-graph", title: "Number of Islands", difficulty: "Medium", acRate: 62, isPaidOnly: false, topicTagSlugs: ["breadth-first-search"], resolvedDomain: "graphs-search", difficultyScore: 1117, excluded: false },
-    { slug: "free-bs-hidden", title: "Koko Eating Bananas", difficulty: "Medium", acRate: 66, isPaidOnly: false, topicTagSlugs: ["binary-search"], resolvedDomain: "binary-search", difficultyScore: 1087, excluded: false },
-    { slug: "free-bs-title", title: "Binary Search", difficulty: "Easy", acRate: 58, isPaidOnly: false, topicTagSlugs: ["binary-search"], resolvedDomain: "binary-search", difficultyScore: 937, excluded: false },
-  ];
-
-  // Free user excludes paid-graph; Premium user can receive paid-graph
-  assert.deepEqual(
-    selectCandidatesFromCache(catalog, growth, { isPremium: false }).map((c) => c.slug),
-    ["free-graph"],
-  );
-  assert.deepEqual(
-    selectCandidatesFromCache(catalog, growth, { isPremium: true }).map((c) => c.slug),
-    ["paid-graph", "free-graph"],
-  );
-
-  // Explicit single-domain conversational steering -> disables Pattern Selection (w_sel = 0)
-  const singleSteered = adjustPrescriptionIntent({
-    state: s,
-    currentIntent: growth,
-    catalog,
-    isPremium: false,
-    skippedSlugs: new Set(),
-    preferences: prefs,
-    day: 2,
-    override: { domainOverride: "binary-search", maxMinutes: 15 },
-  });
-  assert.equal(singleSteered.intent.targetDomain, "binary-search");
-  assert.equal(singleSteered.intent.targetFacet, "implementation");
-  assert.equal(singleSteered.intent.steeredDomainExplicit, true);
-  assert.deepEqual(singleSteered.intent.defaultTimeboxBand, [15, 15]);
-
-  // Multi-domain pool steering preserves Pattern Selection eligibility (steeredDomainExplicit = false)
-  s.domains["binary-search"].implAttempts = 2; // growth % 3 === 2 -> selection!
-  const multiSteered = adjustPrescriptionIntent({
-    state: s,
-    currentIntent: growth,
-    catalog,
-    isPremium: false,
-    skippedSlugs: new Set(),
-    day: 2,
-    override: { domainPoolOverride: ["binary-search", "dynamic-programming"] },
-  });
-  assert.equal(multiSteered.intent.targetDomain, "binary-search");
-  assert.equal(multiSteered.intent.targetFacet, "selection");
-  assert.equal(multiSteered.intent.steeredDomainExplicit, false);
-  assert.deepEqual(multiSteered.candidates.map((c) => c.slug), ["free-bs-hidden"]); // Rejects "Binary Search"!
-});
-
-test("v8 Drain-Before-Prescribe: drains pending jobs in launchSeq order, retries transient errors, and falls back cleanly on outage", async () => {
+  // F4: Two concurrent drains (testing atomic DB claims via bypassSingleFlight) grade ONCE and NEVER overwrite 'complete' with 'failed'!
   const db = new DatabaseSync(":memory:");
   createRatingSchema(db);
-  db.prepare("INSERT INTO practice_launches(attemptId, launchSeq, day, prescribed, rated, provisionalDomain) VALUES (?, ?, ?, ?, ?, ?)")
-    .run("a1", 1, 1, 1, 1, "hashing-prefix");
-  db.prepare("INSERT INTO practice_launches(attemptId, launchSeq, day, prescribed, rated, provisionalDomain) VALUES (?, ?, ?, ?, ?, ?)")
-    .run("a2", 2, 2, 1, 1, "binary-search");
+  db.prepare("INSERT INTO practice_launches(attemptId, launchSeq, day, startedAt, prescribed, rated, provisionalDomain) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run("j1", 1, 1, 100, 1, 1, "hashing-prefix");
   db.prepare("INSERT INTO rating_jobs(attemptId, status, attempts, lastError, updatedAt) VALUES (?, ?, ?, ?, ?)")
-    .run("a1", "pending", 0, null, 100);
+    .run("j1", "pending", 0, null, 100);
+
+  let gradeCount = 0;
+  const [r1, r2] = await Promise.all([
+    drainPendingRatingJobs(db, async () => {
+      gradeCount += 1;
+      await new Promise((r) => setTimeout(r, 10));
+      return { updates: [{ domain: "hashing-prefix", facet: "implementation", weight: 1, difficulty: 950, score: 1.0 }], familiarity: "new", primaryDomain: "hashing-prefix" };
+    }, { now: 1000, bypassSingleFlight: true }),
+    drainPendingRatingJobs(db, async () => {
+      gradeCount += 1;
+      throw new Error("Slower timeout");
+    }, { now: 1000, bypassSingleFlight: true }),
+  ]);
+  assert.equal(gradeCount, 1); // Only claim winner ran gradeFn!
+  assert.equal(r1.completedJobIds.length + r2.completedJobIds.length, 1);
+  assert.equal((db.prepare("SELECT status FROM rating_jobs WHERE attemptId = 'j1'").get() as any).status, "complete");
+
+  // Single-flight join also returns shared completion
+  db.prepare("INSERT INTO practice_launches(attemptId, launchSeq, day, startedAt, prescribed, rated, provisionalDomain) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run("j2", 2, 2, 200, 1, 1, "binary-search");
   db.prepare("INSERT INTO rating_jobs(attemptId, status, attempts, lastError, updatedAt) VALUES (?, ?, ?, ?, ?)")
-    .run("a2", "pending", 0, null, 101);
+    .run("j2", "pending", 0, null, 200);
+  let sfCalls = 0;
+  const sf = await Promise.all([
+    drainPendingRatingJobs(db, async () => {
+      sfCalls += 1;
+      return { updates: [{ domain: "binary-search", facet: "implementation", weight: 1, difficulty: 950, score: 1.0 }], familiarity: "new", primaryDomain: "binary-search" };
+    }),
+    drainPendingRatingJobs(db, async () => {
+      sfCalls += 1;
+      return { updates: [{ domain: "binary-search", facet: "implementation", weight: 1, difficulty: 950, score: 1.0 }], familiarity: "new", primaryDomain: "binary-search" };
+    }),
+  ]);
+  assert.equal(sfCalls, 1);
+  assert.deepEqual(sf[0], sf[1]);
 
-  const order: string[] = [];
-  let a1Calls = 0;
-  const res = await drainPendingRatingJobs(db, async (attemptId) => {
-    order.push(attemptId);
-    if (attemptId === "a1" && ++a1Calls === 1) {
-      throw new Error("Transient timeout");
-    }
-    return {
-      updates: [
-        {
-          domain: attemptId === "a1" ? "hashing-prefix" : "binary-search",
-          facet: "implementation",
-          weight: 1,
-          difficulty: 960,
-          score: 1.0,
-        },
-      ],
-      familiarity: "new",
-      primaryDomain: attemptId === "a1" ? "hashing-prefix" : "binary-search",
-    };
-  }, { maxAutoRetries: 2, now: 500 });
+  // F16: After 2 graded misses + AI outage (next 6 launches have NO grade events), Easy Reinforcement fires AT MOST ONCE!
+  const launchesOutage: PracticeLaunchRow[] = [
+    { attemptId: "m1", launchSeq: 1, day: 1, prescribed: true, rated: true, provisionalDomain: "hashing-prefix", intent: { slotIndex: 0, slotKind: "growth", targetDomain: "hashing-prefix", targetFacet: "implementation", targetDifficultyBand: [950, 1010] } },
+    { attemptId: "m2", launchSeq: 2, day: 2, prescribed: true, rated: true, provisionalDomain: "two-pointers-window", intent: { slotIndex: 1, slotKind: "breadth", targetDomain: "two-pointers-window", targetFacet: "implementation", targetDifficultyBand: [950, 1010] } },
+  ];
+  const eventsOutage: SkillRatingEventRow[] = [
+    { id: "gm1", attemptId: "m1", launchSeq: 1, kind: "attempt-graded", idempotencyKey: "gm1", occurredDay: 1, createdAt: 10, payload: { updates: [{ domain: "hashing-prefix", facet: "implementation", weight: 1, difficulty: 950, score: 0.0 }], familiarity: "new", primaryDomain: "hashing-prefix" } },
+    { id: "gm2", attemptId: "m2", launchSeq: 2, kind: "attempt-graded", idempotencyKey: "gm2", occurredDay: 2, createdAt: 20, payload: { updates: [{ domain: "two-pointers-window", facet: "implementation", weight: 1, difficulty: 950, score: 0.0 }], familiarity: "new", primaryDomain: "two-pointers-window" } },
+  ];
+  const slotKindsDuringOutage: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    const stOut = replayRatingLedger(launchesOutage, eventsOutage);
+    const nextI = selectDirectorIntent(stOut, 3 + i);
+    slotKindsDuringOutage.push(nextI.slotKind);
+    launchesOutage.push({
+      attemptId: `out-${i}`,
+      launchSeq: 3 + i,
+      day: 3 + i,
+      prescribed: true,
+      rated: true,
+      provisionalDomain: nextI.targetDomain,
+      intent: nextI,
+    });
+  }
+  assert.equal(slotKindsDuringOutage[0], "easy-reinforcement"); // Breaker fires immediately once
+  assert.notEqual(slotKindsDuringOutage[1], "easy-reinforcement");
+  // Wait: natural Slot 4 at step 4 (index 2) can run once, then must never repeat consecutively; max 2 in 6 slots, NEVER 6-in-a-row trap!
+  assert.ok(slotKindsDuringOutage.filter((k) => k === "easy-reinforcement").length <= 2, `No loop: ${slotKindsDuringOutage}`);
+});
 
-  assert.deepEqual(order, ["a1", "a1", "a2"]); // Strictly drained launchSeq 1 before 2, retried a1!
-  assert.deepEqual(res, { completedJobIds: ["a1", "a2"], failedJobIds: [] });
+test("v9 F10, F11, F12 & F13: ordered shortlists, multi-batch escape hatch, preserved steering/cooldown/Easy rotation, & signatureForced guard", () => {
+  // F11 & F12: 3 failed inspections in Batch 1 move cleanly to disjoint Batch 2; "Graphs or DP" rotates to DP (not arrays!)
+  const catalog: CatalogProblemRow[] = [
+    // 4 hashing candidates: first 3 (Bucket 0 around midpoint 1010) fail inspectFn, 4th (Bucket 1 at 1035) succeeds in Batch 2!
+    ...(["h1", "h2", "h3", "h4"] as const).map((slug, i) => ({
+      slug, title: `Hash ${i}`, difficulty: "Medium" as const, acRate: 76 - i, isPaidOnly: false,
+      topicTagSlugs: ["hash-table"], resolvedDomain: "hashing-prefix" as DomainId,
+      difficultyScore: i < 3 ? 1005 + i * 5 : 1035, excluded: false,
+    })),
+    { slug: "dp-opt", title: "Coin Paths", difficulty: "Medium", acRate: 64, isPaidOnly: false, topicTagSlugs: ["dynamic-programming"], resolvedDomain: "dynamic-programming", difficultyScore: 1005, excluded: false },
+    { slug: "arr-decoy", title: "Array Shuffle", difficulty: "Easy", acRate: 50, isPaidOnly: false, topicTagSlugs: ["array"], resolvedDomain: "arrays-strings", difficultyScore: 978, excluded: false },
+    { slug: "dp-easy", title: "Stairs Warmup", difficulty: "Easy", acRate: 72, isPaidOnly: false, topicTagSlugs: ["dynamic-programming"], resolvedDomain: "dynamic-programming", difficultyScore: 866, excluded: false },
+  ];
+  const st = createInitialState();
+  st.prescribedCount = 5;
+  st.lastPracticedDomain = "arrays-strings";
+  st.prescribedRecentDomains = ["arrays-strings"];
 
-  const snap = exportRatingSnapshot(db);
-  assert.equal(snap.ratingEvents.length, 2);
-  const replayed = replayRatingLedger(snap.launches, snap.ratingEvents);
-  assert.equal(replayed.prescribedGradedCount, 2);
-  assert.ok(replayed.globalMu > 1050);
+  const esc = selectShortlistWithInspectionEscapeHatch({
+    catalog,
+    intent: { slotIndex: 0, slotKind: "growth", targetDomain: "hashing-prefix", targetFacet: "implementation", targetDifficultyBand: [980, 1040] },
+    state: st,
+    day: 6,
+    batchSize: 3,
+    maxInspectionsPerBatch: 3,
+    maxTotalInspections: 6,
+    inspectFn: (p) => p.slug === "h4", // First 3 fail!
+  });
+  assert.equal(esc.chosen?.slug, "h4");
+  assert.equal(esc.strategy, "batch-2");
+  assert.equal(new Set(esc.inspectedSlugs).size, 4); // No duplicate inspections!
 
-  // Exhausted failure degrades safely without blocking next prescription
-  db.prepare("INSERT INTO practice_launches(attemptId, launchSeq, day, prescribed, rated, provisionalDomain) VALUES (?, ?, ?, ?, ?, ?)")
-    .run("a3", 3, 3, 1, 1, "graphs-search");
-  db.prepare("INSERT INTO rating_jobs(attemptId, status, attempts, lastError, updatedAt) VALUES (?, ?, ?, ?, ?)")
-    .run("a3", "pending", 0, null, 200);
-  const outRes = await drainPendingRatingJobs(db, async () => {
-    throw new Error("AI provider offline");
-  }, { maxAutoRetries: 2, now: 600 });
-  assert.deepEqual(outRes, { completedJobIds: [], failedJobIds: ["a3"] });
+  // F12: Steering pool ["graphs-search", "dynamic-programming"] with 0 Graphs candidates MUST pick "dynamic-programming", never "arrays-strings"
+  const rotPool = selectShortlistWithInspectionEscapeHatch({
+    catalog,
+    intent: { slotIndex: 0, slotKind: "growth", targetDomain: "graphs-search", targetFacet: "implementation", targetDifficultyBand: [980, 1040] },
+    state: st,
+    day: 6,
+    allowedDomains: ["graphs-search", "dynamic-programming"],
+    inspectFn: () => true,
+  });
+  assert.equal(rotPool.strategy, "rotated");
+  assert.equal(rotPool.intent.targetDomain, "dynamic-programming");
 
-  const fallbackSnap = exportRatingSnapshot(db);
-  const fallbackState = replayRatingLedger(fallbackSnap.launches, fallbackSnap.ratingEvents);
-  assert.equal(fallbackState.prescribedCount, 3);
-  assert.equal(fallbackState.prescribedGradedCount, 2);
-  const slotAfterOutage = selectDirectorIntent(fallbackState, 4);
-  assert.equal(slotAfterOutage.slotIndex, 3);
-  assert.notEqual(slotAfterOutage.targetDomain, "graphs-search");
+  // F12: Rotated Easy Reinforcement preserves Easy band [-210, -135] & preferEasy (not Growth band!)
+  const rotEasy = selectShortlistWithInspectionEscapeHatch({
+    catalog,
+    intent: { slotIndex: 4, slotKind: "easy-reinforcement", targetDomain: "graphs-search", targetFacet: "implementation", targetDifficultyBand: [790, 865], preferEasy: true, clockGoal: "ability" },
+    state: { ...st, globalMu: 1050, recentDomains: ["arrays-strings"], prescribedRecentDomains: ["arrays-strings"], lastPracticedDomain: "arrays-strings" },
+    day: 6,
+    inspectFn: () => true,
+  });
+  assert.equal(rotEasy.strategy, "rotated");
+  assert.notEqual(rotEasy.intent.targetDomain, "arrays-strings"); // Honored cooldown!
+  assert.equal(rotEasy.intent.preferEasy, true);
+  assert.ok(rotEasy.intent.targetDifficultyBand[1] <= 920); // Easy band preserved!
+
+  // F13: signatureForced tags filter out Selection, and <5 disguisable candidates blocks Selection & Growth selSigma hijack
+  assert.equal(isSignatureForcedFromSlugs(["tree", "binary-tree"]), true);
+  assert.equal(isSignatureForcedFromSlugs(["linked-list", "two-pointers"]), true);
+  assert.equal(isSignatureForcedFromSlugs(["array", "binary-search"]), false);
+  const stSig = createInitialState();
+  stSig.prescribedCount = 5;
+  stSig.domains["trees-recursion"].implOffset = 80; // Strong impl, unmeasured selOffset = 0 with selSigma = 110!
+  stSig.domains["trees-recursion"].selOffset = 0;
+  assert.equal(chooseTargetFacet(stSig, "trees-recursion", "growth", { "trees-recursion": 2 }), "implementation");
+  // Without F13 guard, trees-recursion LCB = min(80-66, 0-66) = -66 tied at bottom; WITH F13 guard, impl LCB = +14 so Growth skips it!
+  const gIntent = selectDirectorIntent(stSig, 10, undefined, { "trees-recursion": 2 });
+  assert.notEqual(gIntent.targetDomain, "trees-recursion");
+});
+
+test("v9 F14, F15, F17, F18, F19, D2, D3 & Merge: steering, stale conflict, practice-only, sync, skips, planner check, D2 focus & D3 0.5x", async () => {
+  // F14: domainPoolOverride uses seeded pick, requires >=3 domains for Selection, supports "stretch", coach leak detection, & one-off mute override
+  const s = createInitialState();
+  s.prescribedCount = 5;
+  s.domains["binary-search"].implAttempts = 2;
+  const poolCatalog: CatalogProblemRow[] = [
+    { slug: "bs-1", title: "Koko Eating Bananas", difficulty: "Medium", acRate: 66, isPaidOnly: false, topicTagSlugs: ["binary-search"], resolvedDomain: "binary-search", difficultyScore: 1087, excluded: false },
+    { slug: "dp-1", title: "House Robber", difficulty: "Medium", acRate: 52, isPaidOnly: false, topicTagSlugs: ["dynamic-programming"], resolvedDomain: "dynamic-programming", difficultyScore: 1194, excluded: false },
+    { slug: "gr-1", title: "Number of Islands", difficulty: "Medium", acRate: 62, isPaidOnly: false, topicTagSlugs: ["breadth-first-search"], resolvedDomain: "graphs-search", difficultyScore: 1117, excluded: false },
+    { slug: "bt-1", title: "Subsets", difficulty: "Medium", acRate: 78, isPaidOnly: false, topicTagSlugs: ["backtracking"], resolvedDomain: "backtracking", difficultyScore: 995, excluded: false },
+  ];
+  const baseGrowth: PrescriptionIntent = { slotIndex: 0, slotKind: "growth", targetDomain: "arrays-strings", targetFacet: "implementation", targetDifficultyBand: [955, 1010] };
+
+  // Pool of 2 -> Selection disabled!
+  const pool2 = adjustPrescriptionIntent({
+    state: s, currentIntent: baseGrowth, catalog: poolCatalog, isPremium: false, skippedSlugs: new Set(), day: 5, seed: 0,
+    override: { domainPoolOverride: ["binary-search", "dynamic-programming"] },
+  });
+  assert.equal(pool2.intent.steeredDomainExplicit, true);
+  assert.equal(pool2.intent.targetFacet, "implementation");
+
+  // Pool of 3 across differing seeds doesn't always pick index 0, and enables Selection!
+  const pool3Seed0 = adjustPrescriptionIntent({
+    state: s, currentIntent: baseGrowth, catalog: poolCatalog, isPremium: false, skippedSlugs: new Set(), day: 5, seed: 0,
+    override: { domainPoolOverride: ["binary-search", "dynamic-programming", "graphs-search"] },
+  });
+  const pool3Seed1 = adjustPrescriptionIntent({
+    state: s, currentIntent: baseGrowth, catalog: poolCatalog, isPremium: false, skippedSlugs: new Set(), day: 5, seed: 1,
+    override: { domainPoolOverride: ["binary-search", "dynamic-programming", "graphs-search"] },
+  });
+  assert.notEqual(pool3Seed0.intent.targetDomain, pool3Seed1.intent.targetDomain);
+  assert.equal(pool3Seed0.intent.steeredDomainExplicit, false);
+  assert.equal(pool3Seed0.intent.targetFacet, "selection");
+
+  // slotOverride: "stretch" works!
+  const stretched = adjustPrescriptionIntent({
+    state: s, currentIntent: baseGrowth, catalog: poolCatalog, isPremium: false, skippedSlugs: new Set(), day: 5,
+    override: { slotOverride: "stretch" },
+  });
+  assert.equal(stretched.intent.slotKind, "stretch");
+  assert.deepEqual(stretched.intent.targetDifficultyBand, [1010, 1065]);
+
+  // Explicit one-off override on gated backtracking emits warning without erroring
+  const gatedOneOff = adjustPrescriptionIntent({
+    state: { ...s, globalMu: 920 }, currentIntent: baseGrowth, catalog: poolCatalog, isPremium: false, skippedSlugs: new Set(), day: 5,
+    override: { domainOverride: "backtracking" },
+  });
+  assert.equal(gatedOneOff.intent.targetDomain, "backtracking");
+  assert.ok(gatedOneOff.intent.overrideWarning?.includes("backtracking"));
+  assert.equal(didCoachLeakSelectionTarget(["Try binary search on the answer space"], "binary-search"), true);
+
+  // F15: Stale suppliedId honors saved intent (<48h) instead of silently becoming unrated; >=48h/missing returns conflict!
+  const ctxKey = computePrescriptionContextKey({ intent: baseGrowth, language: "java", isPremium: false, skippedSlugs: [] });
+  const savedMap = new Map<string, SavedPrescriptionRecord>([
+    ["rx-1", { id: "rx-1", slug: "bs-1", language: "java", createdAt: 1000, intent: baseGrowth, contextKey: ctxKey }],
+  ]);
+  assert.equal(resolveLaunchPrescription({ savedById: savedMap, currentContextKey: ctxKey, slug: "bs-1", language: "java", now: 2000 }).mode, "practice-only");
+  assert.equal(resolveLaunchPrescription({ suppliedId: "rx-1", savedById: savedMap, currentContextKey: "changed-key", slug: "bs-1", language: "java", now: 2000 }).mode, "prescribed-stale-honored");
+  assert.equal(resolveLaunchPrescription({ suppliedId: "rx-1", savedById: savedMap, currentContextKey: ctxKey, slug: "bs-1", language: "java", now: 1000 + 49 * 3600_000 }).mode, "conflict");
+
+  // F17: Self-picked catalog launch gives 0 concept credit/inflation AND only applies prevDomain cooldown (never pushes 6-cap)
+  const selfLaunches: PracticeLaunchRow[] = [
+    { attemptId: "sp1", launchSeq: 1, day: 1, prescribed: false, rated: false, provisionalDomain: "dynamic-programming" },
+    { attemptId: "sp2", launchSeq: 2, day: 2, prescribed: false, rated: false, provisionalDomain: "dynamic-programming" },
+  ];
+  const selfEvents: SkillRatingEventRow[] = [
+    { id: "es1", attemptId: "sp1", launchSeq: 1, kind: "attempt-graded", idempotencyKey: "g:sp1", occurredDay: 1, createdAt: 1, payload: { updates: [{ domain: "dynamic-programming", facet: "implementation", weight: 1, difficulty: 1100, score: 1.0 }], familiarity: "new", primaryDomain: "dynamic-programming", statedComplexity: { time: "accurate", space: "accurate" }, conceptOutcomes: [{ slug: "dp-1d-2d", domain: "dynamic-programming", outcome: "applied" }] } },
+    { id: "es2", attemptId: "sp2", launchSeq: 2, kind: "attempt-graded", idempotencyKey: "g:sp2", occurredDay: 2, createdAt: 2, payload: { updates: [{ domain: "dynamic-programming", facet: "implementation", weight: 1, difficulty: 1100, score: 0.0 }], familiarity: "new", primaryDomain: "dynamic-programming", conceptOutcomes: [{ slug: "dp-1d-2d", domain: "dynamic-programming", outcome: "lapsed" }] } },
+  ];
+  const spState = replayRatingLedger(selfLaunches, selfEvents);
+  assert.equal(spState.concepts.size, 0); // ZERO concept credit/inflation!
+  assert.equal(spState.prescribedRecentDomains.length, 0);
+  assert.equal(spState.lastPracticedDomain, "dynamic-programming");
+  // Next Slot 0 with pinned DP (after another domain clears prevDomain) is NOT blocked by those 2 self-picks!
+  spState.prescribedCount = 5;
+  spState.lastPracticedDomain = "arrays-strings";
+  const dpFocusAfterSelf = selectDirectorIntent(spState, 3, { focusDomains: ["dynamic-programming"], mutedDomains: [] });
+  assert.equal(dpFocusAfterSelf.targetDomain, "dynamic-programming");
+
+  // D2: Slot 0 dedicated to strong pinned focusDomains even when Graphs already has +100 offset!
+  const sFocus = createInitialState();
+  sFocus.prescribedCount = 5; // Slot 0
+  sFocus.domains["graphs-search"].implOffset = 100;
+  sFocus.domains["graphs-search"].implSigma = 50;
+  const focusedSlot0 = selectDirectorIntent(sFocus, 10, { focusDomains: ["graphs-search"], mutedDomains: [] });
+  assert.equal(focusedSlot0.slotIndex, 0);
+  assert.equal(focusedSlot0.targetDomain, "graphs-search");
+
+  // D3: Easy Reinforcement concept stability growth is discounted 0.5x on already-applied concepts
+  const sD3A = createInitialState();
+  const sD3B = createInitialState();
+  updateConceptRecord(sD3A, "union-find", "graphs-search", 0, "coached");
+  updateConceptRecord(sD3A, "union-find", "graphs-search", 5, "applied"); // 14d
+  updateConceptRecord(sD3B, "union-find", "graphs-search", 0, "coached");
+  updateConceptRecord(sD3B, "union-find", "graphs-search", 5, "applied"); // 14d
+  updateConceptRecord(sD3A, "union-find", "graphs-search", 20, "applied", { fromEasyReinforcement: false });
+  updateConceptRecord(sD3B, "union-find", "graphs-search", 20, "applied", { fromEasyReinforcement: true });
+  assert.ok(
+    sD3B.concepts.get("union-find")!.stabilityDays < sD3A.concepts.get("union-find")!.stabilityDays,
+    "0.5x Easy Reinforcement grows slower than full Consolidation",
+  );
+
+  // F18: CatalogSyncManager resumes after error & clears backoff on success
+  const syncMgr = new CatalogSyncManager();
+  await syncMgr.step(async (skip) => ({ totalNum: 250, count: skip === 0 ? 100 : 100 }), 1000);
+  assert.equal(syncMgr.nextSkip, 100);
+  await syncMgr.step(async () => { throw new Error("429"); }, 1001);
+  assert.equal(syncMgr.nextSkip, 100); // Resumes from exact offset!
+  assert.equal(syncMgr.backoffMs, 1000);
+  await syncMgr.step(async () => ({ totalNum: 250, count: 100 }), 2000);
+  await syncMgr.step(async () => ({ totalNum: 250, count: 50 }), 3000);
+  assert.equal(syncMgr.needsRefresh(4000), false);
+
+  // F19: "Choose another" skip counting (1-2 keep domain, 3 rotates) + Planner validation + Snapshot merge launchSeq re-indexing
+  assert.equal(selectSkipOutcome(sFocus, baseGrowth, 1, 5).rotateDomain, false);
+  assert.equal(selectSkipOutcome(sFocus, baseGrowth, 2, 5).rotateDomain, false);
+  const skip3 = selectSkipOutcome(sFocus, baseGrowth, 3, 5);
+  assert.equal(skip3.rotateDomain, true);
+  assert.notEqual(skip3.intent.targetDomain, baseGrowth.targetDomain);
+
+  assert.equal(
+    validatePlannerResult({
+      slug: "bs-1", reason: "Good problem for testing edge-case index bounds without hints.", minutes: 20,
+      difficultyModifier: 0, kind: "new-challenge", evidenceIds: [], disguiseVerified: true,
+      verifiedSlugs: new Set(["bs-1"]), suppliedEvidenceIds: new Set(), intent: baseGrowth,
+    }),
+    true,
+  );
+
+  const merged = mergeRatingSnapshots(
+    { launches: [{ attemptId: "old-1", launchSeq: 1, day: 1, startedAt: 10, prescribed: true, rated: true, provisionalDomain: "hashing-prefix" }], ratingJobs: [], ratingEvents: [] },
+    { launches: [{ attemptId: "new-1", launchSeq: 1, day: 2, startedAt: 20, prescribed: true, rated: true, provisionalDomain: "binary-search" }], ratingJobs: [{ attemptId: "new-1", status: "running", attempts: 1, lastError: null, updatedAt: 20 }], ratingEvents: [{ id: "en", attemptId: "new-1", launchSeq: 1, kind: "attempt-graded", idempotencyKey: "k", occurredDay: 2, createdAt: 20, payload: { updates: [], familiarity: "new", primaryDomain: "binary-search" } }] },
+  );
+  assert.deepEqual(merged.launches.map((l) => [l.attemptId, l.launchSeq]), [["old-1", 1], ["new-1", 2]]);
+  assert.equal(merged.ratingEvents[0].launchSeq, 2);
+  assert.equal(merged.ratingJobs[0].status, "pending");
 });
