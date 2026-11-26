@@ -1,18 +1,11 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import {
-  Badge,
-  Button,
-  Group,
-  Modal,
-  Select,
-  Stack,
-  Tabs,
-} from "@mantine/core";
-import { Download, RefreshCw, Trash2 } from "lucide-react";
+import { Badge, Button, Group, Modal, Select, Stack } from "@mantine/core";
+import { Download, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import ReviewFlags from "./review-flags";
 import ReviewFlagButton from "./review-flag";
 import UsageDiagnostics from "./usage-diagnostics";
+import { SectionSwitch } from "./ui";
 import { api } from "@/lib/browser";
 import type {
   TraceRun,
@@ -30,11 +23,20 @@ type Listing = {
   warning: string | null;
 };
 const time = (at: number) => new Date(at).toLocaleString();
+const shortTime = (at: number) =>
+  new Date(at).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 const elapsed = (r: TraceRun) =>
   `${(((r.endedAt ?? Date.now()) - r.startedAt) / 1000).toFixed(1)}s`;
-function State({ run }: { run: TraceRun }) {
+function State({ run, size }: { run: TraceRun; size?: "xs" | "sm" }) {
   return (
     <Badge
+      size={size ?? "sm"}
+      className="diag-status"
       color={
         run.status === "succeeded"
           ? "teal"
@@ -48,36 +50,44 @@ function State({ run }: { run: TraceRun }) {
     </Badge>
   );
 }
+export type DiagnosticsTab = "runs" | "usage" | "flags";
 export default function AgentDiagnostics({
   initialId,
   initialFlag,
+  initialTab,
   onSelect,
+  onTabChange,
 }: {
   initialId?: string;
   initialFlag?: string;
+  initialTab?: DiagnosticsTab;
   onSelect?: (id: string) => void;
+  onTabChange?: (tab: DiagnosticsTab) => void;
 }) {
+  const [tab, setTab] = useState<DiagnosticsTab>(
+    initialTab ?? (initialFlag ? "flags" : "runs"),
+  );
   return (
-    <Tabs
-      defaultValue={initialFlag ? "flags" : "runs"}
-      keepMounted={false}
-      className="diagnostic-tabs"
-    >
-      <Tabs.List>
-        <Tabs.Tab value="runs">Agent runs</Tabs.Tab>
-        <Tabs.Tab value="usage">Usage</Tabs.Tab>
-        <Tabs.Tab value="flags">Review flags</Tabs.Tab>
-      </Tabs.List>
-      <Tabs.Panel value="runs">
+    <div className="settings-subpage diagnostic-tabs">
+      <SectionSwitch
+        aria-label="Diagnostics view"
+        value={tab}
+        onChange={(next) => {
+          setTab(next);
+          onTabChange?.(next);
+        }}
+        data={[
+          { value: "runs", label: "Agent runs" },
+          { value: "usage", label: "Usage" },
+          { value: "flags", label: "Review flags" },
+        ]}
+      />
+      {tab === "runs" && (
         <TraceDiagnostics initialId={initialId} onSelect={onSelect} />
-      </Tabs.Panel>
-      <Tabs.Panel value="usage">
-        <UsageDiagnostics />
-      </Tabs.Panel>
-      <Tabs.Panel value="flags">
-        <ReviewFlags initialId={initialFlag} />
-      </Tabs.Panel>
-    </Tabs>
+      )}
+      {tab === "usage" && <UsageDiagnostics />}
+      {tab === "flags" && <ReviewFlags initialId={initialFlag} />}
+    </div>
   );
 }
 function TraceDiagnostics({
@@ -183,30 +193,30 @@ function TraceDiagnostics({
   }
   const activeFamily = detail?.family.some((r) => r.status === "running");
   return (
-    <section className="diagnostics-page">
-      <div className="section-heading">
-        <div>
-          <h1>Agent diagnostics</h1>
-          <p>
-            Inspect what each agent received, the tools it used, and how its
-            result was checked.
-          </p>
-        </div>
-      </div>
+    <section className="diagnostics-page diag-view">
+      <p className="diag-view-lead">
+        Inspect what each agent received, the tools it used, and how its result
+        was checked.
+      </p>
       <div className="diagnostic-notice">
-        These logs include code and conversations. They are separate from your
-        practice history and snapshots. Authentication details and private model
-        reasoning are excluded. Earlier activity cannot be reconstructed.
+        <ShieldCheck size={16} aria-hidden="true" />
+        <p>
+          These logs include code and conversations. They are separate from your
+          practice history and snapshots. Authentication details and private
+          model reasoning are excluded. Earlier activity cannot be
+          reconstructed.
+        </p>
       </div>
       {(error || listing?.warning) && (
         <div className="banner error" role="alert">
           {error || listing?.warning}
         </div>
       )}
-      <Group justify="space-between" align="end" my="lg">
-        <Group align="end">
+      <div className="diag-toolbar">
+        <div className="diag-filter-row" role="group" aria-label="Filter runs">
           <Select
-            label="Agent"
+            aria-label="Agent"
+            className="diag-filter diag-filter-wide"
             value={role || null}
             placeholder="All agents"
             clearable
@@ -217,7 +227,8 @@ function TraceDiagnostics({
             }}
           />
           <Select
-            label="Status"
+            aria-label="Status"
+            className="diag-filter"
             value={status || null}
             placeholder="All statuses"
             clearable
@@ -234,7 +245,8 @@ function TraceDiagnostics({
             }}
           />
           <Select
-            label="Data"
+            aria-label="Data"
+            className="diag-filter"
             value={mode || null}
             placeholder="Practice & test"
             clearable
@@ -244,8 +256,8 @@ function TraceDiagnostics({
               setOffset(0);
             }}
           />
-        </Group>
-        <Group>
+        </div>
+        <div className="diag-filters">
           <Button
             variant="default"
             leftSection={<RefreshCw size={15} />}
@@ -262,74 +274,80 @@ function TraceDiagnostics({
           >
             Export all
           </Button>
-        </Group>
-      </Group>
+        </div>
+      </div>
       <div className="diagnostics-grid">
         <aside className="diagnostic-list" aria-label="Agent runs">
           <p className="diagnostic-count">
             {listing?.total ?? 0} runs · newest first
           </p>
-          {listing?.runs.length === 0 && (
-            <p>
-              No runs recorded yet. The next agent request will appear here.
-            </p>
+          <div className="diagnostic-list-body">
+            {!listing && <p className="diag-empty-line">Loading runs…</p>}
+            {listing?.runs.length === 0 && (
+              <p className="diag-empty-line">
+                No runs recorded yet. The next agent request will appear here.
+              </p>
+            )}
+            {listing?.runs.map((r) => (
+              <button
+                type="button"
+                key={r.id}
+                className={`diagnostic-run ${selected === r.id ? "selected" : ""}`}
+                aria-current={selected === r.id ? "true" : undefined}
+                title={`${r.kind} · ${r.mode} · ${time(r.startedAt)}`}
+                onClick={() => setSelected(r.id)}
+              >
+                <span className="diagnostic-run-head">
+                  <strong>{r.role}</strong>
+                  <State run={r} size="xs" />
+                </span>
+                <small>
+                  {shortTime(r.startedAt)} · {elapsed(r)} ·{" "}
+                  {r.model ?? "Workflow"}
+                  {r.effort ? ` · ${r.effort}` : ""}
+                  {r.mode !== "practice" ? ` · ${r.mode}` : ""}
+                </small>
+              </button>
+            ))}
+          </div>
+          {(offset > 0 || offset + 50 < (listing?.total ?? 0)) && (
+            <Group justify="space-between" className="diagnostic-list-footer">
+              <Button
+                variant="subtle"
+                size="xs"
+                disabled={!offset}
+                onClick={() => setOffset(Math.max(0, offset - 50))}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="subtle"
+                size="xs"
+                disabled={offset + 50 >= (listing?.total ?? 0)}
+                onClick={() => setOffset(offset + 50)}
+              >
+                Next
+              </Button>
+            </Group>
           )}
-          {listing?.runs.map((r) => (
-            <button
-              type="button"
-              key={r.id}
-              className={`diagnostic-run ${selected === r.id ? "selected" : ""}`}
-              onClick={() => setSelected(r.id)}
-            >
-              <span>
-                <strong>{r.role}</strong>
-                <State run={r} />
-              </span>
-              <small>
-                {r.kind} · {r.mode} · {elapsed(r)}
-              </small>
-              <small>{time(r.startedAt)}</small>
-              <small>
-                {r.model ?? "Workflow"}
-                {r.effort ? ` · ${r.effort}` : ""}
-              </small>
-            </button>
-          ))}
-          <Group justify="space-between" mt="md">
-            <Button
-              variant="subtle"
-              disabled={!offset}
-              onClick={() => setOffset(Math.max(0, offset - 50))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="subtle"
-              disabled={offset + 50 >= (listing?.total ?? 0)}
-              onClick={() => setOffset(offset + 50)}
-            >
-              Next
-            </Button>
-          </Group>
         </aside>
         <article className="diagnostic-detail" aria-label="Run details">
           {!detail ? (
-            <p>
+            <p className="diag-detail-empty">
               {selected && !error
                 ? "Loading run…"
                 : "Select a run to inspect its inputs, events, and outcome."}
             </p>
           ) : (
             <>
-              <Group justify="space-between">
-                <h2>{detail.run.role}</h2>
+              <div className="diag-detail-head">
+                <h3>{detail.run.role}</h3>
                 <State run={detail.run} />
-              </Group>
-              <p>
+              </div>
+              <p className="diag-detail-meta">
                 {detail.run.kind} · {detail.run.mode} · {elapsed(detail.run)} ·{" "}
                 {time(detail.run.startedAt)}
-              </p>
-              <p>
+                <br />
                 {detail.run.model ?? "Application workflow"}
                 {detail.run.effort ? ` · ${detail.run.effort} effort` : ""}
               </p>
@@ -346,7 +364,7 @@ function TraceDiagnostics({
                 <p className="diagnostic-error">{detail.run.error}</p>
               )}
               {detail.run.usage ? (
-                <p>
+                <p className="diag-detail-usage">
                   {detail.run.usage.totalTokens.toLocaleString()} tokens ·{" "}
                   {detail.run.usage.inputTokens.toLocaleString()} input ·{" "}
                   {detail.run.usage.outputTokens.toLocaleString()} output.
@@ -354,17 +372,18 @@ function TraceDiagnostics({
                   separate.
                 </p>
               ) : (
-                <p className="text-muted">
+                <p className="diag-detail-usage">
                   Token usage{" "}
                   {detail.run.kind === "workflow"
                     ? "is recorded on its model calls."
                     : "was not reported by the runtime."}
                 </p>
               )}
-              <Group my="md">
+              <Group gap="xs" className="diag-detail-actions">
                 <Button
                   variant="default"
                   size="xs"
+                  leftSection={<Download size={13} />}
                   onClick={() => void action(() => download(detail.run.id))}
                 >
                   Export run & related calls
@@ -378,11 +397,11 @@ function TraceDiagnostics({
                 >
                   Clear this run family
                 </Button>
+                <ReviewFlagButton
+                  target={{ kind: "agent-run", traceId: detail.run.id }}
+                />
               </Group>
-              <ReviewFlagButton
-                target={{ kind: "agent-run", traceId: detail.run.id }}
-              />
-              <h3>Related calls</h3>
+              <h4 className="diag-detail-section">Related calls</h4>
               <div className="diagnostic-family">
                 {detail.family.map((r) => (
                   <Button
@@ -398,7 +417,7 @@ function TraceDiagnostics({
               </div>
               <div className="diagnostic-events-header">
                 <div>
-                  <h3>Recorded events</h3>
+                  <h4>Recorded events</h4>
                   {detail.rawEventCount !== undefined &&
                     detail.view === "condensed" &&
                     detail.rawEventCount > detail.events.length && (
@@ -465,16 +484,17 @@ function TraceDiagnostics({
       </div>
       <div className="diagnostic-storage">
         <div>
-          <h2>Log storage</h2>
+          <h3>Log storage</h3>
           <p>
             Expired runs are removed as complete families. Running requests are
             preserved. Clearing logs does not change learning evidence,
             conversations, settings, or saved snapshots.
           </p>
         </div>
-        <Group align="end">
+        <Group align="end" gap="sm" className="diagnostic-storage-controls">
           <Select
             label="Keep completed logs"
+            className="diag-filter diag-filter-wide"
             value={listing ? String(listing.retentionDays ?? "forever") : null}
             data={[
               { value: "7", label: "7 days" },

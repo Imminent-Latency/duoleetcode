@@ -17,7 +17,11 @@ export default function WelcomeOnboarding({
   onError: (err: unknown) => void;
 }) {
   const [busy, setBusy] = useState<StartingTier | "skip" | null>(null);
-  const tiers: StartingTier[] = ["foundations", "interview-prep", "experienced"];
+  const tiers: StartingTier[] = [
+    "foundations",
+    "interview-prep",
+    "experienced",
+  ];
 
   const pick = async (tier: StartingTier) => {
     setBusy(tier);
@@ -53,7 +57,7 @@ export default function WelcomeOnboarding({
 
   return (
     <Panel className="panel welcome-onboarding-card">
-      <div className="card-topline">
+      <div className="welcome-onboarding-head">
         <h2>Starting difficulty</h2>
         <Button
           className="text-button"
@@ -63,7 +67,7 @@ export default function WelcomeOnboarding({
           Skip (default: Foundations)
         </Button>
       </div>
-      <p className="recommendation-description">
+      <p className="welcome-onboarding-description">
         Choose a starting difficulty band for your first session. Your rating
         calibrates over 4 timed sessions.
       </p>
@@ -72,12 +76,17 @@ export default function WelcomeOnboarding({
           const cfg = STARTING_TIER_BANDS[tier];
           const isDefault = tier === DEFAULT_STARTING_TIER;
           return (
-            <div key={tier} className="tier-option-card">
+            <div
+              key={tier}
+              className={
+                isDefault ? "tier-option-card recommended" : "tier-option-card"
+              }
+            >
               <div className="tier-option-head">
                 <strong>{cfg.label}</strong>
                 {isDefault && <span className="pill mint">Recommended</span>}
               </div>
-              <p className="small">{cfg.description}</p>
+              <p className="tier-option-description">{cfg.description}</p>
               <div className="tier-option-meta">
                 <span>
                   Band {cfg.band[0]}–{cfg.band[1]}
@@ -87,7 +96,9 @@ export default function WelcomeOnboarding({
                 </span>
               </div>
               <Button
-                className={isDefault ? "button primary full" : "button secondary full"}
+                className={
+                  isDefault ? "button primary full" : "button secondary full"
+                }
                 disabled={!!busy}
                 onClick={() => void pick(tier)}
               >

@@ -1,12 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Badge, Group, Select, Tabs, TextInput } from "@mantine/core";
+import {
+  Badge,
+  Button as MantineButton,
+  Group,
+  Select,
+  TextInput,
+} from "@mantine/core";
 import {
   ArrowDownToLine,
   ArrowUpRight,
   ChevronRight,
   History,
+  Search,
   ShieldCheck,
 } from "lucide-react";
 import { api } from "@/lib/browser";
@@ -15,7 +22,7 @@ import { timeAtSequence } from "@/lib/reflection";
 import { buildTimelineProjection } from "@/lib/timeline-markers";
 import { languageConfig } from "@/lib/languages";
 import type { Attempt, AttemptSummary } from "@/lib/types";
-import { Button, Panel } from "./ui";
+import { Button, Panel, SectionSwitch } from "./ui";
 import CoachText from "./coach-text";
 import ResearchSources from "./research-sources";
 import { JudgeResults } from "./test-workbench";
@@ -59,6 +66,7 @@ const kindNames: Record<string, string> = {
   "system-design": "System design",
   recall: "Pocket recall",
 };
+const ROW_BATCH = 15;
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export default function PracticeLibrary({
@@ -79,6 +87,7 @@ export default function PracticeLibrary({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [backup, setBackup] = useState<{ at: number } | null>();
+  const [showAll, setShowAll] = useState(false);
   useEffect(() => {
     if (!sandboxMode)
       void api("/api/library")
@@ -130,37 +139,35 @@ export default function PracticeLibrary({
     );
   return (
     <section className="library-section">
-      <div className="section-heading">
-        <h2>Practice library</h2>
-        <History size={19} />
-      </div>
       {error && (
         <p role="alert" className="error-text">
           {error}
         </p>
       )}
-      <Tabs value={tab} onChange={setTab}>
-        <Tabs.List>
-          {!sandboxMode && <Tabs.Tab value="practice">Practice</Tabs.Tab>}
-          <Tabs.Tab value="sandbox">Test sessions</Tabs.Tab>
-          {!sandboxMode && (
-            <Tabs.Tab value="preview">Pages import preview</Tabs.Tab>
-          )}
-        </Tabs.List>
-      </Tabs>
-      {tab === "preview" ? (
-        <ImportPreview />
-      ) : (
-        <>
+      <div className="library-toolbar">
+        {!sandboxMode && (
+          <SectionSwitch
+            aria-label="Session type"
+            value={tab ?? "practice"}
+            onChange={setTab}
+            data={[
+              { value: "practice", label: "Practice" },
+              { value: "sandbox", label: "Test sessions" },
+              { value: "preview", label: "Pages import preview" },
+            ]}
+          />
+        )}
+        {tab !== "preview" && (
           <div className="library-filters">
             <TextInput
-              label="Search sessions"
-              placeholder="Problem name"
+              aria-label="Search sessions"
+              placeholder="Search by problem name"
+              leftSection={<Search size={15} />}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
             <Select
-              label="Filter sessions"
+              aria-label="Filter sessions"
               value={outcome}
               onChange={(v) => setOutcome(v ?? "all")}
               allowDeselect={false}
@@ -172,14 +179,20 @@ export default function PracticeLibrary({
               ]}
             />
           </div>
+        )}
+      </div>
+      {tab === "preview" ? (
+        <ImportPreview />
+      ) : (
+        <>
           {tab === "sandbox" && (
-            <p className="small">
+            <p className="library-note">
               Test sessions are kept in a separate database and excluded from
               your practice totals.
             </p>
           )}
           <Panel className="panel history-list">
-            {rows.map((a) => (
+            {(showAll ? rows : rows.slice(0, ROW_BATCH)).map((a) => (
               <Button
                 className="history-row"
                 key={a.id}
@@ -187,14 +200,14 @@ export default function PracticeLibrary({
                 onClick={() => void open(a)}
               >
                 <span className="history-icon">
-                  <History size={18} />
+                  <History size={16} />
                 </span>
                 <div>
                   <strong>{a.title}</strong>
                   <p>
-                    {languageConfig(a.language).shortLabel} · {when(a.createdAt)}{" "}
-                    · {Math.round(a.budgetMs / 60000)} min budget · {a.events}{" "}
-                    events
+                    {languageConfig(a.language).shortLabel} ·{" "}
+                    {when(a.createdAt)} · {Math.round(a.budgetMs / 60000)} min
+                    budget · {a.events} events
                   </p>
                 </div>
                 <span className={a.verdict === "Accepted" ? "positive" : ""}>
@@ -204,9 +217,20 @@ export default function PracticeLibrary({
                 <ChevronRight size={16} />
               </Button>
             ))}
+            {rows.length > ROW_BATCH && (
+              <button
+                type="button"
+                className="library-more"
+                onClick={() => setShowAll((v) => !v)}
+              >
+                {showAll
+                  ? "Show fewer sessions"
+                  : `Show all ${rows.length} sessions`}
+              </button>
+            )}
             {!rows.length && (
               <div className="empty-state">
-                <History size={24} />
+                <History size={22} />
                 <h3>No matching sessions</h3>
                 <p>Saved sessions will appear here.</p>
               </div>
@@ -218,7 +242,7 @@ export default function PracticeLibrary({
         <Panel className="panel library-storage">
           <div>
             <h3>
-              <ShieldCheck size={17} /> Practice backups
+              <ShieldCheck size={16} /> Practice backups
             </h3>
             <p>
               {backup
@@ -234,9 +258,16 @@ export default function PracticeLibrary({
             >
               Back up now
             </Button>
-            <a className="text-button" href="/api/library?kind=export" download>
-              <ArrowDownToLine size={15} /> Export JSON
-            </a>
+            <MantineButton
+              component="a"
+              variant="default"
+              size="sm"
+              href="/api/library?kind=export"
+              download
+              leftSection={<ArrowDownToLine size={15} />}
+            >
+              Export JSON
+            </MantineButton>
           </Group>
         </Panel>
       )}
@@ -266,9 +297,18 @@ function ImportPreview() {
         {error}
       </p>
     );
-  if (data === undefined) return <p role="status">Loading import preview…</p>;
+  if (data === undefined)
+    return (
+      <Panel className="panel library-preview-empty">
+        <p role="status">Loading import preview…</p>
+      </Panel>
+    );
   if (!data)
-    return <p>No Pages import preview has been staged on this device.</p>;
+    return (
+      <Panel className="panel library-preview-empty">
+        <p>No Pages import preview has been staged on this device.</p>
+      </Panel>
+    );
   return (
     <div className="library-preview">
       <Panel className="panel">
@@ -362,6 +402,9 @@ export function SavedSession({
 }) {
   const [seq, setSeq] = useState(a.lastSeq);
   const [selectedTimelineId, setSelectedTimelineId] = useState<string>();
+  const [view, setView] = useState<"recording" | "judge" | "coaching">(
+    "recording",
+  );
   const reviewFlags = useAttemptReviewFlags(a.id, !readOnly);
   const timeline = useMemo(
     () => buildTimelineProjection(a, a.evaluations.at(-1), reviewFlags),
@@ -414,220 +457,220 @@ export function SavedSession({
       <h2>{a.problem.title}</h2>
       <p>
         {languageConfig(a.language).profileLabel} · {when(a.createdAt)} ·{" "}
-        {minutes} ·{" "}
-        {a.demonstration ? "Test session" : "Recorded practice"}
+        {minutes} · {a.demonstration ? "Test session" : "Recorded practice"}
       </p>
-      <Tabs defaultValue="recording" keepMounted={false}>
-        <Tabs.List>
-          <Tabs.Tab value="recording">Recording</Tabs.Tab>
-          <Tabs.Tab value="judge">Judge results ({a.jobs.length})</Tabs.Tab>
-          <Tabs.Tab value="coaching">Coaching</Tabs.Tab>
-        </Tabs.List>
-        <Tabs.Panel value="recording">
-          <Panel className="panel">
-            <h3>
-              {seq === a.lastSeq
-                ? a.sealed
-                  ? "Sealed independent solution"
-                  : "Latest saved solution"
-                : "Replay snapshot"}
-            </h3>
-            {a.lastSeq > 0 && (
-              <label className="library-range">
-                Replay event {seq} / {a.lastSeq}
-                <input
-                  type="range"
-                  min={0}
-                  max={a.lastSeq}
-                  value={seq}
-                  onChange={(e) => setSeq(Number(e.target.value))}
-                />
-              </label>
-            )}
-            <TimelineOverlayTrack
-              projection={timeline}
-              playheadPct={
-                timeline.totalMs > 0
-                  ? (timeAtSequence(a, seq) / timeline.totalMs) * 100
-                  : a.lastSeq > 0
-                    ? (seq / a.lastSeq) * 100
-                    : 0
-              }
-              selectedId={selectedTimelineId}
-              onSelect={(item) => {
+      <SectionSwitch
+        aria-label="Saved session view"
+        value={view}
+        onChange={setView}
+        data={[
+          { value: "recording", label: "Recording" },
+          { value: "judge", label: `Judge results (${a.jobs.length})` },
+          { value: "coaching", label: "Coaching" },
+        ]}
+      />
+      {view === "recording" && (
+        <Panel className="panel">
+          <h3>
+            {seq === a.lastSeq
+              ? a.sealed
+                ? "Sealed independent solution"
+                : "Latest saved solution"
+              : "Replay snapshot"}
+          </h3>
+          {a.lastSeq > 0 && (
+            <label className="library-range">
+              Replay event {seq} / {a.lastSeq}
+              <input
+                type="range"
+                min={0}
+                max={a.lastSeq}
+                value={seq}
+                onChange={(e) => setSeq(Number(e.target.value))}
+              />
+            </label>
+          )}
+          <TimelineOverlayTrack
+            projection={timeline}
+            playheadPct={
+              timeline.totalMs > 0
+                ? (timeAtSequence(a, seq) / timeline.totalMs) * 100
+                : a.lastSeq > 0
+                  ? (seq / a.lastSeq) * 100
+                  : 0
+            }
+            selectedId={selectedTimelineId}
+            onSelect={(item) => {
+              setSelectedTimelineId(item.id);
+              setSeq(item.pauseSeq ?? item.endSeq);
+            }}
+          />
+          {selectedTimelineItem && (
+            <TimelineInspectorCard
+              attempt={a}
+              item={selectedTimelineItem}
+              items={timeline.chronologicalItems}
+              onSelectItem={(item) => {
                 setSelectedTimelineId(item.id);
                 setSeq(item.pauseSeq ?? item.endSeq);
               }}
+              onJumpSeq={(targetSeq) =>
+                setSeq(Math.max(0, Math.min(a.lastSeq, targetSeq)))
+              }
+              onClose={() => setSelectedTimelineId(undefined)}
             />
-            {selectedTimelineItem && (
-              <TimelineInspectorCard
-                attempt={a}
-                item={selectedTimelineItem}
-                items={timeline.chronologicalItems}
-                onSelectItem={(item) => {
-                  setSelectedTimelineId(item.id);
-                  setSeq(item.pauseSeq ?? item.endSeq);
-                }}
-                onJumpSeq={(targetSeq) =>
-                  setSeq(Math.max(0, Math.min(a.lastSeq, targetSeq)))
-                }
-                onClose={() => setSelectedTimelineId(undefined)}
-              />
-            )}
-            <pre className="library-code">
-              {seq === a.lastSeq ? a.source : replay(a, seq)}
-            </pre>
-            {readOnly ? (
-              <details className="library-evidence">
-                <summary>Work segments ({a.workSegments?.length ?? 0})</summary>
-                {a.workSegments?.map((segment) => (
-                  <p key={segment.id}>
-                    {segment.kind === "assessment"
-                      ? `${when(segment.startedAt)} → ${segment.endedAt ? when(segment.endedAt) : "In progress at capture"}`
-                      : `${segment.date} · ${segment.minutes ?? "Unspecified"} minutes · ${segment.note ?? ""}`}
-                  </p>
-                ))}
-              </details>
-            ) : (
-              <WorkSegmentLog attempt={a} onUpdated={onUpdated} />
-            )}
-            {!!a.annotations.length && (
-              <details className="library-evidence">
-                <summary>Recorded annotations ({a.annotations.length})</summary>
-                {a.annotations.map((n) => (
-                  <p key={n.id}>
-                    Event {n.seq}: {n.comment || n.judgement}
-                  </p>
-                ))}
-              </details>
-            )}
-          </Panel>
-        </Tabs.Panel>
-        <Tabs.Panel value="judge">
-          <Panel className="panel">
-            {a.jobs.length ? (
-              <JudgeResults jobs={a.jobs} problem={a.problem} />
-            ) : (
-              <p>No runs or submissions recorded.</p>
-            )}
-            {a.jobs.map((j, i) => (
-              <details className="library-evidence" key={j.id}>
-                <summary>
-                  {j.kind === "run" ? "Run" : "Submission"} {i + 1} ·{" "}
-                  {j.summary?.verdict ?? j.state} · event {j.seq} · exact code
-                </summary>
-                <pre className="library-code">{j.source}</pre>
-              </details>
-            ))}
-          </Panel>
-        </Tabs.Panel>
-        <Tabs.Panel value="coaching">
-          <Panel className="panel library-transcript">
-            {a.evaluations.length > 0 && (
-              <>
-                <h3>Saved feedback</h3>
-                {a.evaluations.map((e, i) => (
-                  <details
-                    className="library-evidence"
-                    key={i}
-                    open={i === a.evaluations.length - 1}
-                  >
-                    <summary>
-                      Review {i + 1} · {when(e.createdAt)}
-                    </summary>
-                    <CoachText sources={e.research?.sources}>
-                      {e.summary}
-                    </CoachText>
-                    {[...e.strengths, ...e.gaps].map((f, n) => (
-                      <p key={n}>
-                        <strong>{f.skill}:</strong> {f.observation}
-                      </p>
-                    ))}
-                    <ResearchSources research={e.research} />
-                  </details>
-                ))}
-              </>
-            )}
-            {a.reflection?.intake && (
-              <>
-                <h3>First reflection answers</h3>
-                <p>
-                  Familiarity: {a.reflection.intake.familiarity} · Space:{" "}
-                  {a.reflection.intake.spaceComplexity} · Time:{" "}
-                  {a.reflection.intake.timeComplexity}
+          )}
+          <pre className="library-code">
+            {seq === a.lastSeq ? a.source : replay(a, seq)}
+          </pre>
+          {readOnly ? (
+            <details className="library-evidence">
+              <summary>Work segments ({a.workSegments?.length ?? 0})</summary>
+              {a.workSegments?.map((segment) => (
+                <p key={segment.id}>
+                  {segment.kind === "assessment"
+                    ? `${when(segment.startedAt)} → ${segment.endedAt ? when(segment.endedAt) : "In progress at capture"}`
+                    : `${segment.date} · ${segment.minutes ?? "Unspecified"} minutes · ${segment.note ?? ""}`}
                 </p>
-              </>
-            )}
-            {reflection.length > 0 && <h3>Reflection conversation</h3>}
-            {reflection.map((m) => (
-              <div className="library-message" key={m.id}>
-                <strong>{m.role === "user" ? "You" : "Coach"}</strong>{" "}
-                <small>{when(m.createdAt)}</small>
-                <CoachText sources={m.research?.sources}>{m.text}</CoachText>
-                <ResearchSources research={m.research} />
+              ))}
+            </details>
+          ) : (
+            <WorkSegmentLog attempt={a} onUpdated={onUpdated} />
+          )}
+          {!!a.annotations.length && (
+            <details className="library-evidence">
+              <summary>Recorded annotations ({a.annotations.length})</summary>
+              {a.annotations.map((n) => (
+                <p key={n.id}>
+                  Event {n.seq}: {n.comment || n.judgement}
+                </p>
+              ))}
+            </details>
+          )}
+        </Panel>
+      )}
+      {view === "judge" && (
+        <Panel className="panel">
+          {a.jobs.length ? (
+            <JudgeResults jobs={a.jobs} problem={a.problem} />
+          ) : (
+            <p>No runs or submissions recorded.</p>
+          )}
+          {a.jobs.map((j, i) => (
+            <details className="library-evidence" key={j.id}>
+              <summary>
+                {j.kind === "run" ? "Run" : "Submission"} {i + 1} ·{" "}
+                {j.summary?.verdict ?? j.state} · event {j.seq} · exact code
+              </summary>
+              <pre className="library-code">{j.source}</pre>
+            </details>
+          ))}
+        </Panel>
+      )}
+      {view === "coaching" && (
+        <Panel className="panel library-transcript">
+          {a.evaluations.length > 0 && (
+            <>
+              <h3>Saved feedback</h3>
+              {a.evaluations.map((e, i) => (
+                <details
+                  className="library-evidence"
+                  key={i}
+                  open={i === a.evaluations.length - 1}
+                >
+                  <summary>
+                    Review {i + 1} · {when(e.createdAt)}
+                  </summary>
+                  <CoachText sources={e.research?.sources}>
+                    {e.summary}
+                  </CoachText>
+                  {[...e.strengths, ...e.gaps].map((f, n) => (
+                    <p key={n}>
+                      <strong>{f.skill}:</strong> {f.observation}
+                    </p>
+                  ))}
+                  <ResearchSources research={e.research} />
+                </details>
+              ))}
+            </>
+          )}
+          {a.reflection?.intake && (
+            <>
+              <h3>First reflection answers</h3>
+              <p>
+                Familiarity: {a.reflection.intake.familiarity} · Space:{" "}
+                {a.reflection.intake.spaceComplexity} · Time:{" "}
+                {a.reflection.intake.timeComplexity}
+              </p>
+            </>
+          )}
+          {reflection.length > 0 && <h3>Reflection conversation</h3>}
+          {reflection.map((m) => (
+            <div className="library-message" key={m.id}>
+              <strong>{m.role === "user" ? "You" : "Coach"}</strong>{" "}
+              <small>{when(m.createdAt)}</small>
+              <CoachText sources={m.research?.sources}>{m.text}</CoachText>
+              <ResearchSources research={m.research} />
+            </div>
+          ))}
+          {a.followup && (
+            <>
+              <h3>Focused practice</h3>
+              <div className="library-message">
+                <strong>Your first response</strong>
+                <CoachText>{a.followup.answer}</CoachText>
               </div>
-            ))}
-            {a.followup && (
-              <>
-                <h3>Focused practice</h3>
+              {a.followup.feedback && (
                 <div className="library-message">
-                  <strong>Your first response</strong>
-                  <CoachText>{a.followup.answer}</CoachText>
+                  <strong>Initial feedback</strong>
+                  <CoachText sources={a.followup.research?.sources}>
+                    {a.followup.feedback}
+                  </CoachText>
+                  <ResearchSources research={a.followup.research} />
                 </div>
-                {a.followup.feedback && (
-                  <div className="library-message">
-                    <strong>Initial feedback</strong>
-                    <CoachText sources={a.followup.research?.sources}>
-                      {a.followup.feedback}
-                    </CoachText>
-                    <ResearchSources research={a.followup.research} />
-                  </div>
-                )}
-                {focused.map((m) => (
-                  <div className="library-message" key={m.id}>
-                    <strong>{m.role === "user" ? "You" : "Coach"}</strong>{" "}
-                    <small>{when(m.createdAt)}</small>
-                    <CoachText sources={m.research?.sources}>
-                      {m.text}
-                    </CoachText>
-                    <ResearchSources research={m.research} />
-                  </div>
-                ))}
-                {a.followup.coachedCode !== undefined && (
-                  <details className="library-evidence">
-                    <summary>Coached solution</summary>
-                    <pre className="library-code">{a.followup.coachedCode}</pre>
-                  </details>
-                )}
-              </>
-            )}
-            {!!help.length && <h3>Reference help during the assessment</h3>}
-            {help.map((h) => (
-              <div className="library-message" key={h.id}>
-                <strong>{h.question}</strong>
-                <CoachText sources={h.research?.sources}>
-                  {h.answer ?? ""}
-                </CoachText>
-                <ResearchSources research={h.research} />
-              </div>
-            ))}
-            {next && (
-              <>
-                <h3>Next practice: {next.title}</h3>
-                <CoachText sources={next.research?.sources}>
-                  {next.reason}
-                </CoachText>
-                <ResearchSources research={next.research} />
-              </>
-            )}
-            {!a.evaluations.length &&
-              !a.reflection?.intake &&
-              !reflection.length &&
-              !a.followup &&
-              !help.length && <p>No coaching or reflection recorded.</p>}
-          </Panel>
-        </Tabs.Panel>
-      </Tabs>
+              )}
+              {focused.map((m) => (
+                <div className="library-message" key={m.id}>
+                  <strong>{m.role === "user" ? "You" : "Coach"}</strong>{" "}
+                  <small>{when(m.createdAt)}</small>
+                  <CoachText sources={m.research?.sources}>{m.text}</CoachText>
+                  <ResearchSources research={m.research} />
+                </div>
+              ))}
+              {a.followup.coachedCode !== undefined && (
+                <details className="library-evidence">
+                  <summary>Coached solution</summary>
+                  <pre className="library-code">{a.followup.coachedCode}</pre>
+                </details>
+              )}
+            </>
+          )}
+          {!!help.length && <h3>Reference help during the assessment</h3>}
+          {help.map((h) => (
+            <div className="library-message" key={h.id}>
+              <strong>{h.question}</strong>
+              <CoachText sources={h.research?.sources}>
+                {h.answer ?? ""}
+              </CoachText>
+              <ResearchSources research={h.research} />
+            </div>
+          ))}
+          {next && (
+            <>
+              <h3>Next practice: {next.title}</h3>
+              <CoachText sources={next.research?.sources}>
+                {next.reason}
+              </CoachText>
+              <ResearchSources research={next.research} />
+            </>
+          )}
+          {!a.evaluations.length &&
+            !a.reflection?.intake &&
+            !reflection.length &&
+            !a.followup &&
+            !help.length && <p>No coaching or reflection recorded.</p>}
+        </Panel>
+      )}
     </section>
   );
 }

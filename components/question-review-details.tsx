@@ -19,7 +19,7 @@ export default function QuestionReviewDetails({
           ? "Material evidence covered"
           : "Coverage incomplete"}
       </p>
-      <p className="text-muted">
+      <p className="question-review-note">
         These are internal investigation questions, not a checklist for you.
         Findings remain open to correction in the conversation.
       </p>

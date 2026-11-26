@@ -1004,7 +1004,7 @@ export class AcpRuntimePool {
     if (!catalog?.status.signedIn) {
       throw new Error(
         catalog?.status.detail ||
-          `${provider} is not signed in. Check Connections first.`,
+          `${provider} is not signed in. Check Settings → Connections first.`,
       );
     }
     const conn = this.getConnection(provider);

@@ -14,7 +14,7 @@ export default function AssessmentMenu({
   onAssistance: () => void;
 }) {
   return (
-    <Menu width={290} position="bottom-end" offset={8}>
+    <Menu width={320} position="bottom-end" offset={8}>
       <Menu.Target>
         <ActionIcon
           className="submit-options"

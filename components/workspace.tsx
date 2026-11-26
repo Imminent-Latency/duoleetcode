@@ -9,7 +9,6 @@ import {
   NavLink,
   NumberInput,
   SegmentedControl,
-  Select,
   Tabs,
 } from "@mantine/core";
 import { SplitPane } from "./split-pane";
@@ -17,19 +16,18 @@ import { TestCases, JudgeResults } from "./test-workbench";
 import AssessmentMenu from "./assessment-menu";
 import ReflectionWorkspace from "./reflection-workspace";
 import AgentSettings from "./agent-settings";
-import AgentDiagnostics from "./agent-diagnostics";
+import AgentDiagnostics, { type DiagnosticsTab } from "./agent-diagnostics";
 import CoachMemory from "./coach-memory";
 import DataManagement from "./data-management";
-import ProblemPrescription, {
-  useProblemPrescription,
-} from "./problem-prescription";
-import WelcomeOnboarding from "./welcome-onboarding";
-import {
-  ProgressSkillProfile,
-  TodayRatingCard,
-  type RatingsProfileDto,
-} from "./skill-profile";
-import PracticeLibrary from "./practice-library";
+import { useProblemPrescription } from "./problem-prescription";
+import TodayView from "./today-view";
+import ProblemCatalog from "./problem-catalog";
+import ProgressView, { type ProgressTab } from "./progress-view";
+import ConnectionsView from "./connections-view";
+import SettingsView, {
+  SETTINGS_PAGE_LABELS,
+  type SettingsPage,
+} from "./settings-view";
 import ReviewFlagButton from "./review-flag";
 import ResearchSources from "./research-sources";
 import JavaHelpChat, { type RecordHelp } from "./java-help";
@@ -42,23 +40,19 @@ import {
   BookOpen,
   Check,
   CheckCircle2,
-  ChevronLeft,
   ChevronRight,
   Clock3,
   Code2,
   Compass,
   FlaskConical,
   History,
-  Link2,
   MessageCircle,
   LoaderCircle,
   Pause,
   Play,
-  RotateCcw,
   Search,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
   Target,
   Timer,
   TrendingUp,
@@ -104,31 +98,36 @@ const ProblemDescription = dynamic(() => import("./problem-description"), {
   ssr: false,
 });
 const CodeEditor = dynamic(() => import("./code-editor"), { ssr: false });
-type View =
-  | "today"
-  | "catalog"
-  | "history"
-  | "connections"
-  | "settings"
-  | "diagnostics"
-  | "memory"
-  | "data"
-  | "attempt";
+// Top-level sections. Settings and Progress have nested sub-pages kept in
+// separate state (settingsPage / progressTab) so the last one is remembered.
+type View = "today" | "catalog" | "history" | "memory" | "settings" | "attempt";
+type Section = Exclude<View, "attempt">;
+const SECTION_LABELS: Record<Section, string> = {
+  today: "Today",
+  catalog: "Problem library",
+  history: "Progress",
+  memory: "Coach memory",
+  settings: "Settings",
+};
+const PRIMARY_NAV = [
+  { id: "today", label: "Today", icon: Compass },
+  { id: "catalog", label: "Problem library", icon: BookOpen },
+  { id: "history", label: "Progress", icon: TrendingUp },
+  { id: "memory", label: "Coach memory", icon: MessageCircle },
+] as const;
 const duration = (ms: number) =>
   `${Math.floor(Math.max(0, ms) / 60000)
     .toString()
     .padStart(2, "0")}:${Math.floor((Math.max(0, ms) % 60000) / 1000)
     .toString()
     .padStart(2, "0")}`;
-const date = (ms: number) =>
-  new Date(ms).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export default function Workspace() {
   const [view, setView] = useState<View>("today");
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>("general");
+  const [progressTab, setProgressTab] = useState<ProgressTab>("overview");
+  const [diagnosticsTab, setDiagnosticsTab] = useState<DiagnosticsTab>();
   const [diagnosticId, setDiagnosticId] = useState<string>();
   const [reviewFlagId, setReviewFlagId] = useState<string>();
   const [state, setState] = useState<any>();
@@ -148,7 +147,8 @@ export default function Workspace() {
   );
   const lastAutoBridgeCheckAt = useRef(0);
   const [agentStatus, setAgentStatus] = useState<any>();
-  const [preferredLanguage, setPreferredLanguage] = useState<LanguageId>("java");
+  const [preferredLanguage, setPreferredLanguage] =
+    useState<LanguageId>("java");
   const languageOverridden = useRef(false);
   const [sessionLanguage, setSessionLanguage] = useState<LanguageId>("java");
   const [javaStatus, setJavaStatus] = useState("Warming Java…");
@@ -160,7 +160,8 @@ export default function Workspace() {
   const [saveStatus, setSaveStatus] = useState("All changes saved");
   const [now, setNow] = useState(Date.now());
   const [selected, setSelected] = useState<Problem>();
-  const [selectedPrescription, setSelectedPrescription] = useState<Prescription>();
+  const [selectedPrescription, setSelectedPrescription] =
+    useState<Prescription>();
   const [minutes, setMinutes] = useState(25);
   const [testSession, setTestSession] = useState(false);
   const [otherTab, setOtherTab] = useState(false);
@@ -194,8 +195,14 @@ export default function Workspace() {
     try {
       localStorage.setItem(PREFERRED_LANGUAGE_KEY, next);
     } catch {}
-    if (next === "cpp") void cpp().prepare().catch(() => {});
-    else void java().prepare().catch(() => {});
+    if (next === "cpp")
+      void cpp()
+        .prepare()
+        .catch(() => {});
+    else
+      void java()
+        .prepare()
+        .catch(() => {});
   };
   const reload = useCallback(async () => {
     const data = await api("/api/state");
@@ -318,8 +325,14 @@ export default function Workspace() {
       setAttempt(recovered);
       setSource(recovered.source);
       setView("attempt");
-      if (attemptLanguage(recovered) === "cpp") void cpp().prepare().catch(() => {});
-      else void java().prepare().catch(() => {});
+      if (attemptLanguage(recovered) === "cpp")
+        void cpp()
+          .prepare()
+          .catch(() => {});
+      else
+        void java()
+          .prepare()
+          .catch(() => {});
       localStorage.setItem(
         storageMode.current === "test"
           ? "duo-test-open-attempt"
@@ -336,7 +349,9 @@ export default function Workspace() {
   useEffect(() => {
     let initialLang: LanguageId = "java";
     try {
-      initialLang = normalizeLanguage(localStorage.getItem(PREFERRED_LANGUAGE_KEY));
+      initialLang = normalizeLanguage(
+        localStorage.getItem(PREFERRED_LANGUAGE_KEY),
+      );
       setPreferredLanguage(initialLang);
     } catch {}
     void reload()
@@ -348,8 +363,14 @@ export default function Workspace() {
             localStorage.setItem(PREFERRED_LANGUAGE_KEY, serverLang);
           } catch {}
           if (serverLang !== initialLang) {
-            if (serverLang === "cpp") void cpp().prepare().catch(() => {});
-            else void java().prepare().catch(() => {});
+            if (serverLang === "cpp")
+              void cpp()
+                .prepare()
+                .catch(() => {});
+            else
+              void java()
+                .prepare()
+                .catch(() => {});
           }
         }
         const params = new URLSearchParams(window.location.search);
@@ -365,12 +386,14 @@ export default function Workspace() {
         }
         if (flagId) {
           setReviewFlagId(flagId);
-          setView("diagnostics");
+          setSettingsPage("diagnostics");
+          setView("settings");
           return;
         }
         if (traceId) {
           setDiagnosticId(traceId);
-          setView("diagnostics");
+          setSettingsPage("diagnostics");
+          setView("settings");
           return;
         }
         const last = localStorage.getItem(
@@ -523,7 +546,9 @@ export default function Workspace() {
         if (action === "resume") {
           await r.flush();
           if (attemptLanguage(r.attempt) === "cpp") {
-            await cpp().prepare().catch(() => {});
+            await cpp()
+              .prepare()
+              .catch(() => {});
           } else {
             await java().prepare();
           }
@@ -666,8 +691,14 @@ export default function Workspace() {
     }, 2500);
     return () => clearInterval(timer);
   }, []);
-  const navigate = (next: View) => {
+  // `sub` opens a nested page; omitted, the section's last sub-page is kept.
+  function navigate(next: "settings", sub?: SettingsPage): void;
+  function navigate(next: "history", sub?: ProgressTab): void;
+  function navigate(next: View): void;
+  function navigate(next: View, sub?: SettingsPage | ProgressTab) {
     if (next !== "attempt") void changePause("pause");
+    if (next === "settings" && sub) setSettingsPage(sub as SettingsPage);
+    if (next === "history" && sub) setProgressTab(sub as ProgressTab);
     setView(next);
     setError("");
     setNotice("");
@@ -684,7 +715,7 @@ export default function Workspace() {
     ) {
       void checkBridge();
     }
-  };
+  }
   const closeLoginPopup = useCallback(() => {
     stopLoginWatchRef.current?.();
     stopLoginWatchRef.current = undefined;
@@ -773,7 +804,11 @@ export default function Workspace() {
       if (
         document.hidden ||
         ["active", "paused"].includes(active.current?.phase ?? "") ||
-        !["today", "catalog", "connections"].includes(view)
+        !(
+          view === "today" ||
+          view === "catalog" ||
+          (view === "settings" && settingsPage === "connections")
+        )
       )
         return;
       lastAutoBridgeCheckAt.current = Date.now();
@@ -786,7 +821,7 @@ export default function Workspace() {
       window.removeEventListener("focus", onReturn);
       document.removeEventListener("visibilitychange", onReturn);
     };
-  }, [checkBridge, view]);
+  }, [checkBridge, view, settingsPage]);
   const connect = async () => {
     if (
       (connection.kind === "signed-out" ||
@@ -871,8 +906,14 @@ export default function Workspace() {
         ? preferredLanguage
         : langs[0];
       setSessionLanguage(chosen);
-      if (chosen === "cpp") void cpp().prepare().catch(() => {});
-      else void java().prepare().catch(() => {});
+      if (chosen === "cpp")
+        void cpp()
+          .prepare()
+          .catch(() => {});
+      else
+        void java()
+          .prepare()
+          .catch(() => {});
       setSelected(normalized);
     } catch (e) {
       showError(e);
@@ -885,7 +926,9 @@ export default function Workspace() {
     setBusy("Starting assessment");
     try {
       if (sessionLanguage === "cpp") {
-        await cpp().prepare().catch(() => {});
+        await cpp()
+          .prepare()
+          .catch(() => {});
       } else {
         await java().prepare();
       }
@@ -1017,9 +1060,7 @@ export default function Workspace() {
   };
   useAgentSymbols(
     attempt?.id,
-    Boolean(
-      busy && attempt?.sealed && attemptLanguage(attempt) === "java",
-    ),
+    Boolean(busy && attempt?.sealed && attemptLanguage(attempt) === "java"),
   );
   const runAgent = async (
     action: "evaluate" | "coach" | "reflect" | "prepare",
@@ -1087,8 +1128,7 @@ export default function Workspace() {
     attempt && view === "attempt"
       ? attemptLanguage(attempt)
       : preferredLanguage;
-  const topbarEngineStatus =
-    topbarLanguage === "cpp" ? cppStatus : javaStatus;
+  const topbarEngineStatus = topbarLanguage === "cpp" ? cppStatus : javaStatus;
   const topbarEngineReady =
     topbarLanguage === "cpp"
       ? cppStatus === "C++26 ready"
@@ -1112,29 +1152,15 @@ export default function Workspace() {
             duoleet<span className="brand-light">code</span>
           </span>
         </Button>
-        <nav>
-          {(
-            [
-              { id: "today", label: "Today", icon: Compass },
-              { id: "catalog", label: "Problem library", icon: BookOpen },
-              { id: "history", label: "Progress", icon: TrendingUp },
-              { id: "memory", label: "Coach memory", icon: MessageCircle },
-              { id: "data", label: "Snapshots & data", icon: History },
-              { id: "connections", label: "Connections", icon: Link2 },
-              { id: "diagnostics", label: "Agent diagnostics", icon: Code2 },
-              {
-                id: "settings",
-                label: "Settings",
-                icon: SlidersHorizontal,
-              },
-            ] as const
-          ).map(({ id, label, icon: Icon }) => (
+        <nav aria-label="Workspace">
+          {PRIMARY_NAV.map(({ id, label, icon: Icon }) => (
             <NavLink
               component="button"
               key={id}
               active={view === id}
               label={label}
               aria-label={label}
+              title={label}
               leftSection={<Icon size={19} />}
               rightSection={
                 id === "today" ? <span className="nav-dot" /> : undefined
@@ -1142,6 +1168,16 @@ export default function Workspace() {
               onClick={() => navigate(id)}
             />
           ))}
+          <div className="nav-divider" role="separator" />
+          <NavLink
+            component="button"
+            active={view === "settings"}
+            label="Settings"
+            aria-label="Settings"
+            title="Settings"
+            leftSection={<SlidersHorizontal size={19} />}
+            onClick={() => navigate("settings")}
+          />
         </nav>
         {attempt && (
           <Button
@@ -1185,33 +1221,24 @@ export default function Workspace() {
         <header className="topbar">
           <div className="breadcrumb">
             Workspace <ChevronRight size={14} />
+            {view === "settings" && (
+              <>
+                {SECTION_LABELS.settings} <ChevronRight size={14} />
+              </>
+            )}
             <strong>
-              {view === "diagnostics"
-                ? "Agent diagnostics"
-                : view === "today"
-                  ? "Today"
-                  : view === "catalog"
-                    ? "Problem library"
-                    : view === "history"
-                      ? "Progress"
-                      : view === "connections"
-                        ? "Connections"
-                        : view === "memory"
-                          ? "Coach memory"
-                          : view === "data"
-                            ? "Snapshots & data"
-                            : view === "settings"
-                              ? "Settings"
-                              : attempt?.phase === "active"
-                                ? "Assessment"
-                                : "Your session"}
+              {view === "settings"
+                ? SETTINGS_PAGE_LABELS[settingsPage]
+                : view !== "attempt"
+                  ? SECTION_LABELS[view]
+                  : attempt?.phase === "active"
+                    ? "Assessment"
+                    : "Your session"}
             </strong>
           </div>
           <div className="top-status">
             <span
-              className={
-                topbarEngineReady ? "status-dot" : "status-dot amber"
-              }
+              className={topbarEngineReady ? "status-dot" : "status-dot amber"}
             />
             {topbarEngineStatus}
             <span className="separator" />
@@ -1248,8 +1275,8 @@ export default function Workspace() {
               <span>
                 C++26 requires DuoLeetCode Local Bridge v
                 {CPP_MIN_BRIDGE_VERSION}+ (loaded:{" "}
-                {connection.version ? `v${connection.version}` : "unknown"}).
-                In chrome://extensions, remove the older extension and Load
+                {connection.version ? `v${connection.version}` : "unknown"}). In
+                chrome://extensions, remove the older extension and Load
                 unpacked from spikes/leetcode/extension on this branch.
               </span>
               <Button
@@ -1287,166 +1314,45 @@ export default function Workspace() {
           </div>
         )}
         {view === "today" && (
-          <div className="page-content">
-            <div className="page-heading compact">
-              <div>
-                <h1>Today</h1>
-              </div>
-              <div className="page-heading-actions">
-                <div className="date-chip">
-                  <span>
-                    {new Date(now).toLocaleDateString(undefined, {
-                      weekday: "long",
-                    })}
-                  </span>
-                  <strong>
-                    {new Date(now).toLocaleDateString(undefined, {
-                      month: "long",
-                      day: "numeric",
-                    })}
-                  </strong>
-                </div>
-                <SegmentedControl
-                  aria-label="Practice language"
-                  size="xs"
-                  value={preferredLanguage}
-                  onChange={(value) =>
-                    updatePreferredLanguage(value as LanguageId)
-                  }
-                  data={[
-                    { value: "java", label: "Java 25" },
-                    { value: "cpp", label: "C++26" },
-                  ]}
-                />
-              </div>
-            </div>
-            {!state?.sandboxMode &&
-              state?.ratings?.onboarding?.showWelcomePicker && (
-                <WelcomeOnboarding
-                  onUpdated={async () => {
-                    await reload();
-                  }}
-                  onError={showError}
-                />
-              )}
-            <div className="home-grid">
-              <ProblemPrescription
-                controller={prescription}
-                language={preferredLanguage}
-                isPremium={Boolean(connection?.isPremium)}
-                continuation={state?.recommendation}
-                gate={state?.ratings?.gate}
-                ready={
-                  !!connection?.isSignedIn &&
-                  !!agentStatus?.signedIn &&
-                  !state?.sandboxMode
-                }
-                bridgeConnection={connection}
-                agentSignedIn={!!agentStatus?.signedIn}
-                disabled={!!busy}
-                onOpen={open}
-                onChoose={(slug, budget, rx) => {
-                  setMinutes(budget);
-                  setSelectedPrescription(rx);
-                  void choose(slug);
-                }}
-                onBrowse={() => {
-                  setSelectedPrescription(undefined);
-                  navigate("catalog");
-                }}
-                onConnect={() => navigate("connections")}
-                onBridgeAction={connect}
-              />
-              <Panel className="panel setup-preview">
-                <h3>Connections</h3>
-                <ConnectionLine
-                  ok={connection.isSignedIn}
-                  tone={
-                    connection.isSignedIn
-                      ? "ok"
-                      : connection.bridgeReachable
-                        ? "warn"
-                        : "pending"
-                  }
-                  label={connection.label}
-                  detail={connection.detail}
-                />
-                {!connection.isSignedIn && connection.externalUrl && (
-                  <Button
-                    className="text-button"
-                    disabled={!!busy}
-                    onClick={connect}
-                  >
-                    {connection.actionLabel} <ArrowUpRight size={14} />
-                  </Button>
-                )}
-                <ConnectionLine
-                  ok={!!agentStatus?.signedIn}
-                  label="AI runtime"
-                  detail={
-                    agentStatus?.signedIn
-                      ? `Connected (${agentStatus.provider || "Local AI"})`
-                      : "Connect Codex or Claude"
-                  }
-                />
-                <Button
-                  className="text-button"
-                  onClick={() => navigate("connections")}
-                >
-                  Manage connections <ArrowRight size={14} />
-                </Button>
-              </Panel>
-            </div>
-            <div className="bottom-grid">
-              {!state?.sandboxMode && state?.ratings && (
-                <TodayRatingCard
-                  ratings={state.ratings as RatingsProfileDto}
-                  onRetryDrain={async () => {
-                    try {
-                      await api("/api/ratings", { action: "retry-drain" });
-                      await reload();
-                    } catch (e) {
-                      showError(e);
-                    }
-                  }}
-                  onOpenAttempt={open}
-                />
-              )}
-              <Panel className="panel progress-preview">
-                <div className="section-heading">
-                  <h3>Progress</h3>
-                  <Button
-                    className="text-button"
-                    onClick={() => navigate("history")}
-                  >
-                    View progress <ArrowUpRight size={14} />
-                  </Button>
-                </div>
-                <div className="mini-stats">
-                  <div>
-                    <strong>
-                      {completed.length.toString().padStart(2, "0")}
-                    </strong>
-                    <span>assessments finished</span>
-                  </div>
-                  <div>
-                    <strong>
-                      {(
-                        state?.followups.filter((s: any) => s.hasResponse)
-                          .length ?? 0
-                      )
-                        .toString()
-                        .padStart(2, "0")}
-                    </strong>
-                    <span>follow-ups answered</span>
-                  </div>
-                </div>
-              </Panel>
-            </div>
-          </div>
+          <TodayView
+            now={now}
+            state={state}
+            language={preferredLanguage}
+            onLanguageChange={updatePreferredLanguage}
+            prescription={prescription}
+            connection={connection}
+            agentStatus={agentStatus}
+            busy={!!busy}
+            completedCount={completed.length}
+            onOpen={open}
+            onChoosePrescribed={(slug, budget, rx) => {
+              setMinutes(budget);
+              setSelectedPrescription(rx);
+              void choose(slug);
+            }}
+            onBrowse={() => {
+              setSelectedPrescription(undefined);
+              navigate("catalog");
+            }}
+            onManageConnections={() => navigate("settings", "connections")}
+            onBridgeAction={connect}
+            onViewProgress={() => navigate("history")}
+            onRetryDrain={async () => {
+              try {
+                await api("/api/ratings", { action: "retry-drain" });
+                await reload();
+              } catch (e) {
+                showError(e);
+              }
+            }}
+            onWelcomeUpdated={async () => {
+              await reload();
+            }}
+            onError={showError}
+          />
         )}
         {view === "catalog" && (
-          <Catalog
+          <ProblemCatalog
             language={preferredLanguage}
             onLanguageChange={updatePreferredLanguage}
             onChoose={(slug) => {
@@ -1460,261 +1366,92 @@ export default function Workspace() {
           />
         )}
         {view === "history" && (
-          <Progress
+          <ProgressView
             state={state}
+            tab={progressTab}
+            onTabChange={setProgressTab}
             onOpen={open}
             onRefresh={reload}
             onError={showError}
           />
         )}
-        {view === "settings" && (
-          <AgentSettings onDefaultLanguageChange={updatePreferredLanguage} />
-        )}
-        {view === "diagnostics" && (
-          <AgentDiagnostics
-            initialId={diagnosticId}
-            onSelect={setDiagnosticId}
-            initialFlag={reviewFlagId}
-          />
-        )}
         {view === "memory" && <CoachMemory onOpen={open} />}
-        {view === "data" && (
-          <DataManagement
-            beforeSnapshot={async () => {
-              await recorder.current?.flush();
-            }}
-          />
-        )}
-        {view === "connections" && (
-          <div className="page-content">
-            <div className="page-heading compact">
-              <div>
-                <h1>Connections</h1>
-              </div>
-            </div>
-            <div className="connections-grid">
-              <Panel className="panel connection-card">
-                <span className="large-icon">
-                  <Link2 />
-                </span>
-                <h2>LeetCode</h2>
-                <p>
-                  Fetches problem statements, starter code, and runs LeetCode
-                  tests through your browser.
-                </p>
-                <ConnectionLine
-                  ok={connection.isSignedIn}
-                  tone={
-                    connection.isSignedIn
-                      ? "ok"
-                      : connection.bridgeReachable
-                        ? "warn"
-                        : "pending"
-                  }
-                  label={connection.label}
-                  detail={connection.detail}
+        {view === "settings" && (
+          <SettingsView
+            page={settingsPage}
+            onPageChange={(page) => navigate("settings", page)}
+            pages={{
+              general: (
+                <AgentSettings
+                  onDefaultLanguageChange={updatePreferredLanguage}
+                  onOpenUsage={() => {
+                    setDiagnosticsTab("usage");
+                    navigate("settings", "diagnostics");
+                  }}
                 />
-                <div className="connection-actions">
-                  <Button
-                    className="button primary"
-                    onClick={connect}
-                    disabled={!!busy}
-                  >
-                    {connection.actionLabel}
-                    {connection.externalUrl ? (
-                      <ArrowUpRight size={16} />
-                    ) : (
-                      <ArrowRight size={16} />
-                    )}
-                  </Button>
-                  {connection.externalUrl && (
-                    <Button
-                      className="button secondary"
-                      onClick={() => void checkBridge({ manual: true })}
-                      disabled={!!busy}
-                    >
-                      Check status <RotateCcw size={15} />
-                    </Button>
-                  )}
-                </div>
-                <details
-                  open={
-                    connection.kind === "extension-missing" ||
-                    connection.kind === "permissions-missing" ||
-                    connection.kind === "unsupported-browser" ||
-                    connection.kind === "untrusted-origin"
-                  }
-                >
-                  <summary>Extension setup</summary>
-                  <p>
-                    Load the existing “DuoLeetCode Local Bridge” unpacked
-                    extension from the project’s spikes/leetcode/extension
-                    folder, then open http://127.0.0.1:4318/ in a normal
-                    (non-incognito) tab of that browser. Once signed in to
-                    LeetCode, no open LeetCode tab is needed.
-                  </p>
-                </details>
-              </Panel>
-              <Panel className="panel connection-card">
-                <span className="large-icon">
-                  <Sparkles />
-                </span>
-                <h2>AI learning team</h2>
-                <p>
-                  Codex and Claude (Claude Agent SDK · ACP). Choose models per
-                  feature in Settings.
-                </p>
-                {Array.isArray(agentStatus?.providers) &&
-                agentStatus.providers.length > 0 ? (
-                  agentStatus.providers.map((p: any) => (
-                    <ConnectionLine
-                      key={p.id}
-                      ok={!!p.signedIn}
-                      label={`${p.name} · ${p.signedIn ? "Connected" : "Sign-in needed"}`}
-                      detail={p.detail}
-                    />
-                  ))
-                ) : (
-                  <ConnectionLine
-                    ok={!!agentStatus?.signedIn}
-                    label={
-                      agentStatus?.signedIn
-                        ? "AI runtime connected"
-                        : "AI sign-in needed"
-                    }
-                    detail={
-                      agentStatus?.signedIn
-                        ? "Using your connected local runtime."
-                        : "Your assessment and recording work without AI."
-                    }
-                  />
-                )}
-                <div className="connection-actions">
-                  <Button
-                    className="button secondary"
-                    disabled={!!busy}
-                    onClick={async () => {
-                      setBusy("Checking AI runtimes");
-                      try {
-                        const s = await api("/api/agent");
-                        setAgentStatus(s);
-                        if (!s.codexSignedIn && !s.signedIn) {
-                          const login = await api("/api/agent", {
-                            action: "login",
-                          });
-                          window.open(
-                            login.authUrl,
-                            "_blank",
-                            "noopener,noreferrer",
-                          );
-                          setNotice(
-                            "Complete sign-in, then click Check connection.",
-                          );
-                        }
-                      } catch (e) {
-                        showError(e);
-                      } finally {
-                        setBusy("");
+              ),
+              connections: (
+                <ConnectionsView
+                  connection={connection}
+                  agentStatus={agentStatus}
+                  busy={!!busy}
+                  javaStatus={javaStatus}
+                  cppStatus={cppStatus}
+                  cppDetail={cppDetail}
+                  onBridgeAction={connect}
+                  onRecheckBridge={() => void checkBridge({ manual: true })}
+                  onRefreshRuntimes={async () => {
+                    setBusy("Checking AI runtimes");
+                    try {
+                      const s = await api("/api/agent");
+                      setAgentStatus(s);
+                      if (!s.codexSignedIn && !s.signedIn) {
+                        const login = await api("/api/agent", {
+                          action: "login",
+                        });
+                        window.open(
+                          login.authUrl,
+                          "_blank",
+                          "noopener,noreferrer",
+                        );
+                        setNotice(
+                          "Complete sign-in, then click Check connection.",
+                        );
                       }
-                    }}
-                  >
-                    {agentStatus?.signedIn
-                      ? "Refresh runtimes"
-                      : "Sign in with ChatGPT"}
-                    <ArrowUpRight size={16} />
-                  </Button>
-                  <Button
-                    className="button secondary"
-                    disabled={!!busy}
-                    onClick={() => navigate("settings")}
-                  >
-                    Choose models <ArrowRight size={16} />
-                  </Button>
-                </div>
-              </Panel>
-              <Panel className="panel connection-card">
-                <span className="large-icon">
-                  <Code2 />
-                </span>
-                <h2>Java in your browser</h2>
-                <p>
-                  Semantic completion from javacs, running in a browser JVM. No
-                  local language-server process required.
-                </p>
-                <ConnectionLine
-                  ok={javaStatus === "Java ready"}
-                  label={javaStatus}
-                  detail="Java 25 preview API profile · runtime downloaded on demand"
-                />
-                <Button
-                  className="button secondary"
-                  onClick={() => {
+                    } catch (e) {
+                      showError(e);
+                    } finally {
+                      setBusy("");
+                    }
+                  }}
+                  onChooseModels={() => navigate("settings", "general")}
+                  onWarmJava={() => {
                     void java().prepare().catch(showError);
                   }}
-                >
-                  Warm up Java <RotateCcw size={15} />
-                </Button>
-                <p className="small">
-                  The runtime currently needs an internet connection. Run and
-                  Submit use LeetCode’s judge.
-                </p>
-              </Panel>
-              <Panel className="panel connection-card">
-                <span className="large-icon">
-                  <Code2 />
-                </span>
-                <h2>C++26 local toolchain</h2>
-                <p>
-                  Semantic completion, hover signatures, and diagnostics from
-                  your local clangd process using -std=c++26.
-                </p>
-                <ConnectionLine
-                  ok={cppStatus === "C++26 ready"}
-                  tone={
-                    cppStatus === "C++26 ready"
-                      ? "ok"
-                      : cppStatus === "C++26 unavailable"
-                        ? "warn"
-                        : "pending"
-                  }
-                  label={cppStatus}
-                  detail={cppDetail}
-                />
-                <Button
-                  className="button secondary"
-                  onClick={() => {
+                  onWarmCpp={() => {
                     void cpp().prepare().catch(showError);
                   }}
-                >
-                  Warm up C++26 <RotateCcw size={15} />
-                </Button>
-                <p className="small">
-                  Requires clangd on this machine (or DUO_CLANGD_BIN). Run and
-                  Submit use LeetCode’s judge.
-                </p>
-              </Panel>
-              <Panel className="panel connection-card">
-                <span className="large-icon">
-                  <FlaskConical />
-                </span>
-                <h2>Local demo exercise</h2>
-                <p>
-                  Offline exercise for testing the editor, timer, and review
-                  flow without LeetCode.
-                </p>
-                <p className="small">
-                  Excluded from progress. Remote judging unavailable.
-                </p>
-                <Button
-                  className="button secondary"
-                  disabled={!!busy}
-                  onClick={() => choose(demoProblem.titleSlug)}
-                >
-                  Open a demo assessment <ArrowRight size={16} />
-                </Button>
-              </Panel>
-            </div>
-          </div>
+                  onOpenDemo={() => choose(demoProblem.titleSlug)}
+                />
+              ),
+              data: (
+                <DataManagement
+                  beforeSnapshot={async () => {
+                    await recorder.current?.flush();
+                  }}
+                />
+              ),
+              diagnostics: (
+                <AgentDiagnostics
+                  initialId={diagnosticId}
+                  onSelect={setDiagnosticId}
+                  initialFlag={reviewFlagId}
+                  initialTab={diagnosticsTab}
+                  onTabChange={setDiagnosticsTab}
+                />
+              ),
+            }}
+          />
         )}
         {view === "attempt" &&
           attempt &&
@@ -1915,240 +1652,6 @@ export default function Workspace() {
   );
 }
 
-function ConnectionLine({
-  ok,
-  tone,
-  label,
-  detail,
-}: {
-  ok: boolean;
-  tone?: "ok" | "warn" | "pending";
-  label: string;
-  detail: string;
-}) {
-  const resolvedTone = tone ?? (ok ? "ok" : "pending");
-  return (
-    <div className="connection-line">
-      <span
-        className={
-          resolvedTone === "ok"
-            ? "connection-check"
-            : resolvedTone === "warn"
-              ? "connection-check warn"
-              : "connection-check pending"
-        }
-      >
-        {resolvedTone === "ok" ? <Check size={14} /> : <span />}
-      </span>
-      <div>
-        <strong>{label}</strong>
-        <small>{detail}</small>
-      </div>
-    </div>
-  );
-}
-
-function Catalog({
-  language,
-  onLanguageChange,
-  onChoose,
-  disabled,
-  connection,
-  onBridgeAction,
-  onRecheck,
-}: {
-  language: LanguageId;
-  onLanguageChange: (language: LanguageId) => void;
-  onChoose: (slug: string) => void;
-  disabled: boolean;
-  connection: BridgeConnection;
-  onBridgeAction: () => void;
-  onRecheck: () => void;
-}) {
-  const [search, setSearch] = useState("");
-  const [difficulty, setDifficulty] = useState("");
-  const [skip, setSkip] = useState(0);
-  const [data, setData] = useState<any>();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    if (!connection.bridgeReachable && connection.kind !== "checking") {
-      setLoading(false);
-      return;
-    }
-    let live = true;
-    const timer = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const d = await bridge("list", { search, difficulty, skip, limit: 20 });
-        if (live) {
-          setData(d);
-          setError("");
-        }
-      } catch (e) {
-        if (live) setError(errorText(e));
-      } finally {
-        if (live) setLoading(false);
-      }
-    }, 300);
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
-  }, [search, difficulty, skip, connection.bridgeReachable, connection.kind, connection.isSignedIn]);
-  return (
-    <div className="page-content">
-      <div className="page-heading compact">
-        <div>
-          <h1>Problem library</h1>
-        </div>
-        <SegmentedControl
-          aria-label="Catalog language"
-          size="xs"
-          value={language}
-          onChange={(value) => onLanguageChange(value as LanguageId)}
-          data={[
-            { value: "java", label: "Java 25" },
-            { value: "cpp", label: "C++26" },
-          ]}
-        />
-      </div>
-      <div className="library-tools">
-        <TextInput
-          aria-label="Search problems"
-          value={search}
-          placeholder="Search problems by title…"
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setSkip(0);
-          }}
-        />
-        <Select
-          aria-label="Filter difficulty"
-          value={difficulty || "all"}
-          allowDeselect={false}
-          onChange={(value) => {
-            setDifficulty(value === "all" ? "" : (value ?? ""));
-            setSkip(0);
-          }}
-          data={[
-            { value: "all", label: "All difficulties" },
-            { value: "EASY", label: "Easy" },
-            { value: "MEDIUM", label: "Medium" },
-            { value: "HARD", label: "Hard" },
-          ]}
-        />
-      </div>
-      {!connection.isSignedIn && connection.kind !== "checking" && (
-        <div className="banner error" style={{ marginInline: 0, marginBottom: 14 }}>
-          <span>
-            <strong>{connection.label}.</strong> {connection.detail}
-          </span>
-          <div className="connection-actions" style={{ marginLeft: "auto" }}>
-            <Button
-              className="button primary"
-              disabled={disabled}
-              onClick={onBridgeAction}
-            >
-              {connection.actionLabel}
-              {connection.externalUrl ? (
-                <ArrowUpRight size={14} />
-              ) : (
-                <ArrowRight size={14} />
-              )}
-            </Button>
-            {connection.externalUrl && (
-              <Button
-                className="button secondary"
-                disabled={disabled}
-                onClick={onRecheck}
-              >
-                Check status
-              </Button>
-            )}
-            <Button
-              className="button secondary"
-              disabled={disabled}
-              onClick={() => onChoose(demoProblem.titleSlug)}
-            >
-              Try local exercise
-            </Button>
-          </div>
-        </div>
-      )}
-      {error && <div className="banner error">{error}</div>}
-      <Panel className="panel problem-list">
-        <div className="table-header">
-          <span>PROBLEM</span>
-          <span>DIFFICULTY</span>
-          <span>ACCESS</span>
-        </div>
-        {data?.questions?.map((p: any) => (
-          <Button
-            className="problem-row"
-            key={p.titleSlug}
-            disabled={disabled || loading}
-            onClick={() => onChoose(p.titleSlug)}
-          >
-            <span>
-              <small>
-                {p.questionFrontendId.padStart?.(3, "0") ??
-                  p.questionFrontendId}
-              </small>
-              <strong>{p.title}</strong>
-            </span>
-            <span className={"difficulty " + p.difficulty.toLowerCase()}>
-              {p.difficulty}
-            </span>
-            <span className="problem-access">
-              {p.isPaidOnly ? "Premium" : "Available"}
-              <ArrowUpRight size={16} />
-            </span>
-          </Button>
-        ))}
-        {loading && (
-          <div className="empty-state">
-            <LoaderCircle className="spin" size={20} />
-            Loading problems…
-          </div>
-        )}
-        {!loading && data?.questions?.length === 0 && (
-          <div className="empty-state">
-            No problems matched. Try another search.
-          </div>
-        )}
-      </Panel>
-      <div className="pagination">
-        <span>
-          {data
-            ? `${skip + 1}–${Math.min(skip + 20, data.totalNum)} of ${data.totalNum} problems`
-            : connection.bridgeReachable
-              ? connection.label
-              : "Connect the browser bridge to browse problems."}
-        </span>
-        <div>
-          <Button
-            className="icon-button"
-            aria-label="Previous page"
-            disabled={skip === 0 || loading}
-            onClick={() => setSkip(Math.max(0, skip - 20))}
-          >
-            <ChevronLeft size={17} />
-          </Button>
-          <Button
-            className="icon-button"
-            aria-label="Next page"
-            disabled={!data || skip + 20 >= data.totalNum || loading}
-            onClick={() => setSkip(skip + 20)}
-          >
-            <ChevronRight size={17} />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Assessment({
   attempt,
   source,
@@ -2263,7 +1766,9 @@ function Assessment({
               title={`${lang.helpLabel} · ⌘⇧H / Ctrl+Shift+H in the editor`}
               aria-pressed={referenceOpen}
               aria-label={
-                referenceOpen ? `Hide ${lang.helpLabel}` : `Show ${lang.helpLabel}`
+                referenceOpen
+                  ? `Hide ${lang.helpLabel}`
+                  : `Show ${lang.helpLabel}`
               }
             >
               <MessageCircle size={16} />
@@ -2412,7 +1917,8 @@ function Assessment({
                               {diagnosticStatus}
                             </span>
                             {(diagnosticStatus === "Java checks unavailable" ||
-                              diagnosticStatus === "C++26 checks unavailable") && (
+                              diagnosticStatus ===
+                                "C++26 checks unavailable") && (
                               <Button
                                 className="button ghost compact"
                                 onClick={() =>
@@ -2751,12 +2257,14 @@ function Findings({
             <div>
               <strong>{f.skill}</strong>
               <p>{f.observation}</p>
-              <small>
-                Evidence:{" "}
-                {f.evidence
-                  .map((n) => (n === 0 ? "final snapshot" : `event ${n}`))
-                  .join(", ")}
-              </small>
+              {f.evidence.length > 0 && (
+                <small>
+                  Evidence:{" "}
+                  {f.evidence
+                    .map((n) => (n === 0 ? "final snapshot" : `event ${n}`))
+                    .join(", ")}
+                </small>
+              )}
             </div>
           </div>
         ))}
@@ -2774,12 +2282,14 @@ function Findings({
             <div>
               <strong>{f.skill}</strong>
               <p>{f.observation}</p>
-              <small>
-                Evidence:{" "}
-                {f.evidence
-                  .map((n) => (n === 0 ? "final snapshot" : `event ${n}`))
-                  .join(", ")}
-              </small>
+              {f.evidence.length > 0 && (
+                <small>
+                  Evidence:{" "}
+                  {f.evidence
+                    .map((n) => (n === 0 ? "final snapshot" : `event ${n}`))
+                    .join(", ")}
+                </small>
+              )}
             </div>
           </div>
         ))}
@@ -2789,138 +2299,6 @@ function Findings({
             provide more evidence.
           </p>
         )}
-      </div>
-    </div>
-  );
-}
-
-function Progress({
-  state,
-  onOpen,
-  onRefresh,
-  onError,
-}: {
-  state: any;
-  onOpen: (id: string) => void;
-  onRefresh: () => Promise<unknown>;
-  onError: (err: unknown) => void;
-}) {
-  const attempts: AttemptSummary[] = state?.attempts ?? [];
-  const real = attempts.filter((a) => !a.demonstration);
-  const accepted = real.filter((a) => a.verdict === "Accepted");
-  const days = new Set(
-    real.map((a) => new Date(a.createdAt).toLocaleDateString()),
-  ).size;
-  return (
-    <div className="page-content">
-      <div className="page-heading compact">
-        <div>
-          <h1>Progress</h1>
-        </div>
-      </div>
-      <div className="stats-grid">
-        <Panel className="panel">
-          <span className="stat-label">Assessments</span>
-          <strong>{real.length}</strong>
-        </Panel>
-        <Panel className="panel">
-          <span className="stat-label">Accepted</span>
-          <strong>{accepted.length}</strong>
-        </Panel>
-        <Panel className="panel">
-          <span className="stat-label">Days practiced</span>
-          <strong>{days}</strong>
-        </Panel>
-        <Panel className="panel">
-          <span className="stat-label">Follow-ups</span>
-          <strong>
-            {state?.followups.filter((s: any) => s.hasResponse).length ?? 0}
-          </strong>
-        </Panel>
-      </div>
-      {state?.ratings && (
-        <ProgressSkillProfile
-          ratings={state.ratings as RatingsProfileDto}
-          onRefresh={async () => {
-            await onRefresh();
-          }}
-          onError={onError}
-        />
-      )}
-      <PracticeLibrary
-        key={String(Boolean(state?.sandboxMode))}
-        attempts={attempts}
-        sandboxMode={Boolean(state?.sandboxMode)}
-        onOpen={onOpen}
-      />
-      <div className="section-heading">
-        <h2>Skill evidence</h2>
-        <span>OBSERVATIONS, NOT MASTERY SCORES</span>
-      </div>
-      <div className="skills-grid">
-        {state?.followups.map((s: any, i: number) => (
-          <Panel className="panel" key={i}>
-            <span className="pill mint">
-              {s.hasResponse ? "FOCUSED RECALL" : "SESSION RECORD"}
-            </span>
-            <h3>{s.skill}</h3>
-            <p>
-              {!s.hasResponse && s.reflectionStatus === "ready"
-                ? "Understanding explained during reflection"
-                : s.understanding?.status === "sufficient"
-                  ? s.understanding.support === "independent"
-                    ? "Understanding demonstrated in the first response"
-                    : s.understanding.support === "coached"
-                      ? "Understanding demonstrated during coaching"
-                      : "Session understanding demonstrated; independent recall unassessed"
-                  : s.learningExit?.reason === "skipped"
-                    ? "Coaching skipped; understanding not checked"
-                    : s.learningExit?.reason === "manual"
-                      ? "Moved on manually; understanding check unfinished"
-                      : s.outcome === "independent"
-                        ? "Demonstrated on the first response"
-                        : s.outcome === "partial"
-                          ? "Partially demonstrated; coaching followed"
-                          : s.outcome === "unassessed"
-                            ? "Independent recall is not yet assessed"
-                            : "Needs another focused practice opportunity"}
-            </p>
-            <small>{date(s.date)} · One observation</small>
-          </Panel>
-        ))}
-        {!state?.followups.length && (
-          <Panel className="panel empty-skill">
-            <Target size={22} />
-            <p>
-              Complete a focused follow-up to start building evidence of recall.
-              Historical coaching notes will stay separate from newly observed
-              performance.
-            </p>
-          </Panel>
-        )}
-      </div>
-      <div className="section-heading">
-        <h2>A starting point from your earlier practice</h2>
-        <span>IMPORTED · NOT NEW ASSESSMENTS</span>
-      </div>
-      <div className="skills-grid">
-        {state?.importedHistory?.map((s: any) => (
-          <Panel className="panel" key={s.id}>
-            <span className="pill">{s.provenance}</span>
-            <h3>{s.skill}</h3>
-            <p>{s.observation}</p>
-            <p className="small">{s.support}</p>
-            <a
-              className="text-button"
-              href={s.source}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {s.date ?? "Date unknown"} notes
-              {s.profile ? ` · ${s.profile}` : ""} <ArrowUpRight size={12} />
-            </a>
-          </Panel>
-        ))}
       </div>
     </div>
   );

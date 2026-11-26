@@ -653,7 +653,7 @@ export class AgentRuntime {
       const status = await this.status();
       if (!status.signedIn)
         throw new Error(
-          "Sign in with ChatGPT in Connections before using coaching.",
+          "Sign in with ChatGPT in Settings → Connections before using coaching.",
         );
     }
     // Snapshot once per request. Settings saved during a turn apply to the next turn.

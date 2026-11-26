@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Checkbox,
@@ -9,7 +10,6 @@ import {
   Paper,
   SegmentedControl,
   Select,
-  SimpleGrid,
   Stack,
   Text,
   Title,
@@ -32,8 +32,10 @@ import type { UsageSummary } from "@/lib/agent-trace-types";
 
 export default function AgentSettings({
   onDefaultLanguageChange,
+  onOpenUsage,
 }: {
   onDefaultLanguageChange?: (lang: LanguageId) => void;
+  onOpenUsage?: () => void;
 } = {}) {
   const [settings, setSettings] = useState<Settings>();
   const [baseline, setBaseline] = useState<Settings>();
@@ -105,25 +107,31 @@ export default function AgentSettings({
       setSettings(data.settings);
       setSaved(JSON.stringify(data.settings));
       onDefaultLanguageChange?.(resolveDefaultLanguage(data.settings));
-      setNotice("Saved. These settings apply to every new session and agent request.");
+      setNotice(
+        "Saved. These settings apply to every new session and agent request.",
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
+  const lockedInput = !custom
+    ? {
+        input: {
+          color: "var(--mantine-color-text)",
+          opacity: 0.85,
+        },
+      }
+    : undefined;
+  const dirty = !!settings && JSON.stringify(settings) !== saved;
   return (
-    <div className="page-content">
-      <div className="page-heading compact">
-        <div>
-          <h1>Settings</h1>
-          <p>
-            Default language and AI learning team preferences. Custom gives you
-            control over each feature.
-          </p>
-        </div>
-      </div>
-      <Stack gap="lg">
+    <div className="settings-subpage general-settings">
+      <p className="subpage-description">
+        Default language and AI learning team preferences. Custom gives you
+        control over each feature.
+      </p>
+      <Stack gap="md">
         {error && (
           <Alert color="red" title="Settings unavailable">
             {error}
@@ -135,15 +143,17 @@ export default function AgentSettings({
         {!settings && !error && <Text c="dimmed">Loading settings…</Text>}
         {settings && (
           <>
-            <Paper withBorder radius="md" p="xl">
-              <Group justify="space-between" align="start" gap="xl">
-                <Stack gap="xs" style={{ flex: 1 }}>
-                  <Title order={2}>Default practice language</Title>
-                  <Text c="dimmed">
+            <Paper withBorder className="settings-card settings-rows">
+              <div className="settings-row">
+                <div className="settings-row-text">
+                  <Title order={2} className="settings-row-title">
+                    Default practice language
+                  </Title>
+                  <Text className="settings-help">
                     Preselected for new LeetCode sessions, local exercises, and
                     daily problem recommendations.
                   </Text>
-                </Stack>
+                </div>
                 <SegmentedControl
                   aria-label="Default practice language"
                   value={resolveDefaultLanguage(settings)}
@@ -163,30 +173,31 @@ export default function AgentSettings({
                     );
                   }}
                 />
-              </Group>
-            </Paper>
-            <Paper withBorder radius="md" p="xl">
-              <Group justify="space-between" align="start" gap="xl">
-                <Stack gap="xs" style={{ flex: 1 }}>
-                  <Title order={2}>Platform preset</Title>
-                  <Text c="dimmed">
-                    Applies across Reference help, reflection, assessment feedback,
-                    focused coaching, and planning.
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-text">
+                  <Title order={2} className="settings-row-title">
+                    Platform preset
+                  </Title>
+                  <Text className="settings-help">
+                    Applies across Reference help, reflection, assessment
+                    feedback, focused coaching, and planning.
                   </Text>
-                  <Text size="sm" c="dimmed">
+                  <Text className="settings-caption">
                     We’re tuning Low first: the current model with low reasoning
                     effort. Balanced, Optimal, and Thirsty will follow after
                     comparison testing.
                   </Text>
-                </Stack>
+                </div>
                 <Select
-                  label="Preset"
                   aria-label="Platform preset"
-                  w={280}
-                  maw="100%"
+                  className="settings-row-control"
                   value={settings.preset}
                   disabled={busy}
                   allowDeselect={false}
+                  comboboxProps={{
+                    classNames: { dropdown: "settings-dropdown" },
+                  }}
                   data={agentPresets.map((p) => ({
                     value: p.value,
                     label: p.label,
@@ -211,19 +222,22 @@ export default function AgentSettings({
                       setSettings({ ...settings, preset: "custom" });
                   }}
                 />
-              </Group>
+              </div>
             </Paper>
-            <Paper withBorder radius="md" p="xl">
-              <Stack gap="md">
-                <div>
-                  <Title order={3}>Background &amp; usage controls</Title>
-                  <Text size="sm" c="dimmed" mt={4}>
-                    Non-essential background work is enabled by default on our
-                    Low-effort baseline for faster, richer coaching. Toggle
-                    either option off to conserve plan quota or API spend.
-                  </Text>
-                </div>
+            <Paper withBorder className="settings-card">
+              <div className="settings-card-heading">
+                <Title order={3} className="settings-section-title">
+                  Background &amp; usage controls
+                </Title>
+                <Text className="settings-help">
+                  Non-essential background work is enabled by default on our
+                  Low-effort baseline for faster, richer coaching. Toggle either
+                  option off to conserve plan quota or API spend.
+                </Text>
+              </div>
+              <div className="settings-checks">
                 <Checkbox
+                  classNames={{ description: "settings-check-description" }}
                   label="Background analysis while solving"
                   description="Saves private stretch summaries, documentation lookups, and candidate questions at natural milestones while you code (including test sessions, tracked separately under Test usage)."
                   checked={resolveBackgroundSettings(settings).solvingAnalysis}
@@ -240,6 +254,7 @@ export default function AgentSettings({
                   }}
                 />
                 <Checkbox
+                  classNames={{ description: "settings-check-description" }}
                   label="Prepare review during intake"
                   description="Starts the final evidence and question review while you fill out the 3-question reflection form (without generating a throwaway coach reply). Turn off so skipped reflections use zero calls."
                   checked={resolveBackgroundSettings(settings).preIntakeReview}
@@ -255,7 +270,9 @@ export default function AgentSettings({
                     setSettings(next ? { ...rest, background: next } : rest);
                   }}
                 />
-                {usage && (() => {
+              </div>
+              {usage &&
+                (() => {
                   const fiveHour = usage.windows.find(
                     (w) => w.windowKey === "last5h",
                   );
@@ -264,7 +281,7 @@ export default function AgentSettings({
                   );
                   if (!fiveHour || !thirtyDay) return null;
                   return (
-                    <Text size="xs" c="dimmed">
+                    <Text className="settings-caption settings-usage">
                       Practice usage: Last 5h: {fiveHour.calls.toLocaleString()}{" "}
                       calls ({fiveHour.totalTokens.toLocaleString()} tokens) ·
                       Last 30d: {thirtyDay.calls.toLocaleString()} calls (
@@ -272,122 +289,135 @@ export default function AgentSettings({
                       {thirtyDay.sessions
                         ? `, avg ${thirtyDay.avgCallsPerSession} calls/session`
                         : ""}
-                      ). Open Agent diagnostics → Usage for full feature and
-                      stage breakdowns.
+                      ). Open{" "}
+                      {onOpenUsage ? (
+                        <Anchor
+                          component="button"
+                          className="settings-inline-link"
+                          onClick={onOpenUsage}
+                        >
+                          Settings → Diagnostics → Usage
+                        </Anchor>
+                      ) : (
+                        "Settings → Diagnostics → Usage"
+                      )}{" "}
+                      for full feature and stage breakdowns.
                     </Text>
                   );
                 })()}
-              </Stack>
             </Paper>
-            {teamProfiles.length > 0 && (
-              <Paper withBorder radius="md" p="xl">
-                <Stack gap="md">
-                  <div>
-                    <Title order={3}>Role-paired team profiles (Low effort)</Title>
-                    <Text size="sm" c="dimmed" mt={4}>
+            <Paper withBorder className="settings-card">
+              {teamProfiles.length > 0 && (
+                <>
+                  <div className="settings-card-heading">
+                    <Title order={3} className="settings-section-title">
+                      Role-paired team profiles (Low effort)
+                    </Title>
+                    <Text className="settings-help">
                       Pairs each provider’s flagship reasoning model at Low
                       effort for nuanced reflection, evaluation, and coaching
-                      with its fast coding model at Low effort for live reference
-                      help and problem selection, or customize any individual
-                      model below.
+                      with its fast coding model at Low effort for live
+                      reference help and problem selection, or customize any
+                      individual model below.
                     </Text>
                   </div>
-                  <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+                  <div className="team-profiles">
                     {teamProfiles.map((profile) => {
                       const active = matchesProfile(profile);
                       return (
-                        <Paper
+                        <div
                           key={profile.id}
-                          withBorder
-                          radius="md"
-                          p="md"
-                          style={
-                            active
-                              ? {
-                                  borderColor:
-                                    "var(--mantine-color-teal-filled)",
-                                }
-                              : undefined
-                          }
+                          className="team-profile"
+                          data-active={active || undefined}
                         >
-                          <Stack gap="xs" justify="space-between" h="100%">
-                            <div>
-                              <Group justify="space-between" gap="xs">
-                                <Text fw={600} size="sm">
-                                  {profile.label}
-                                </Text>
-                                <Badge
-                                  size="xs"
-                                  variant="light"
-                                  color={active ? "teal" : "gray"}
-                                >
-                                  {active ? "Active" : profile.provider}
-                                </Badge>
-                              </Group>
-                              <Text size="xs" c="dimmed" mt={6}>
-                                {profile.philosophy}
+                          <div className="team-profile-text">
+                            <div className="team-profile-title">
+                              <Text fw={600} className="team-profile-name">
+                                {profile.label}
                               </Text>
+                              <Badge
+                                variant="light"
+                                color={active ? "teal" : "gray"}
+                              >
+                                {active ? "Active" : profile.provider}
+                              </Badge>
                             </div>
+                            <Text className="settings-caption">
+                              {profile.philosophy}
+                            </Text>
+                          </div>
+                          {!active && (
                             <Button
                               size="xs"
-                              variant={active ? "light" : "default"}
-                              disabled={busy || active}
+                              variant="default"
+                              className="team-profile-action"
+                              disabled={busy}
                               onClick={() => applyTeamProfile(profile)}
                             >
-                              {active ? "Selected" : `Use ${profile.label}`}
+                              {`Use ${profile.label}`}
                             </Button>
-                          </Stack>
-                        </Paper>
+                          )}
+                        </div>
                       );
                     })}
-                  </SimpleGrid>
-                </Stack>
-              </Paper>
-            )}
-            <Group justify="space-between" align="end">
-              <div>
-                <Title order={3}>Feature configuration</Title>
-                <Text size="sm" c="dimmed" mt={2}>
-                  All discovered models across Codex and Claude (Claude SDK ·
-                  ACP) can be mixed per feature.
-                </Text>
+                  </div>
+                </>
+              )}
+              <div
+                className={
+                  teamProfiles.length > 0
+                    ? "settings-card-heading feature-heading divided"
+                    : "settings-card-heading feature-heading"
+                }
+              >
+                <div>
+                  <Title order={3} className="settings-section-title">
+                    Feature configuration
+                  </Title>
+                  <Text className="settings-help">
+                    All discovered models across Codex and Claude (Claude SDK ·
+                    ACP) can be mixed per feature.
+                  </Text>
+                </div>
+                <Badge variant="light">
+                  {custom ? "Custom controls" : "Set by Low"}
+                </Badge>
               </div>
-              <Badge variant="light">
-                {custom ? "Custom controls" : "Set by Low"}
-              </Badge>
-            </Group>
-            <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
-              {agentFeatures.map((feature) => {
-                const choice = settings.features[feature.id];
-                const selectedModel = models.find(
-                  (m) => m.model === choice.model,
-                );
-                return (
-                  <Paper key={feature.id} withBorder radius="md" p="xl">
-                    <Stack gap="md">
-                      <div>
-                        <Title order={4}>{feature.label}</Title>
-                        <Text size="sm" c="dimmed" mt={4}>
+              <div className="feature-table">
+                <div className="feature-table-head" aria-hidden="true">
+                  <span>Feature</span>
+                  <span>Model</span>
+                  <span>Reasoning effort</span>
+                </div>
+                {agentFeatures.map((feature) => {
+                  const choice = settings.features[feature.id];
+                  const selectedModel = models.find(
+                    (m) => m.model === choice.model,
+                  );
+                  return (
+                    <div key={feature.id} className="feature-row">
+                      <div className="feature-row-text">
+                        <Title order={4} className="feature-row-title">
+                          {feature.label}
+                        </Title>
+                        <Text className="settings-caption">
                           {feature.description}
                         </Text>
                       </div>
                       <Select
-                        label="Model"
                         aria-label={`${feature.label} model`}
                         value={choice.model}
                         disabled={!custom || busy}
-                        styles={
-                          !custom
-                            ? {
-                                input: {
-                                  color: "var(--mantine-color-text)",
-                                  opacity: 0.85,
-                                },
-                              }
-                            : undefined
-                        }
+                        styles={lockedInput}
                         searchable
                         allowDeselect={false}
+                        maxDropdownHeight={320}
+                        comboboxProps={{
+                          classNames: {
+                            dropdown:
+                              "settings-dropdown settings-model-dropdown",
+                          },
+                        }}
                         data={[
                           ...groupedModels,
                           ...(!selectedModel
@@ -425,21 +455,14 @@ export default function AgentSettings({
                         }}
                       />
                       <Select
-                        label="Reasoning effort"
                         aria-label={`${feature.label} reasoning effort`}
                         value={choice.effort}
                         disabled={!custom || busy}
-                        styles={
-                          !custom
-                            ? {
-                                input: {
-                                  color: "var(--mantine-color-text)",
-                                  opacity: 0.85,
-                                },
-                              }
-                            : undefined
-                        }
+                        styles={lockedInput}
                         allowDeselect={false}
+                        comboboxProps={{
+                          classNames: { dropdown: "settings-dropdown" },
+                        }}
                         data={(selectedModel?.efforts ?? [choice.effort]).map(
                           (v) => ({
                             value: v,
@@ -459,32 +482,25 @@ export default function AgentSettings({
                           }
                         }}
                       />
-                    </Stack>
-                  </Paper>
-                );
-              })}
-            </SimpleGrid>
-            <Text size="sm" c="dimmed">
-              Changes apply to the next request, including in an existing
-              conversation. A running reply keeps its settings. Model choices
-              come from your connected runtime; access is confirmed when a
-              request runs.
-            </Text>
-            <Group justify="space-between">
-              <Text size="sm" role="status">
-                {notice ||
-                  (JSON.stringify(settings) !== saved
-                    ? "Unsaved changes"
-                    : "Saved on this device")}
+                    </div>
+                  );
+                })}
+              </div>
+              <Text className="settings-caption feature-footnote">
+                Changes apply to the next request, including in an existing
+                conversation. A running reply keeps its settings. Model choices
+                come from your connected runtime; access is confirmed when a
+                request runs.
               </Text>
-              <Button
-                onClick={save}
-                loading={busy}
-                disabled={busy || JSON.stringify(settings) === saved}
-              >
+            </Paper>
+            <div className="settings-savebar" data-dirty={dirty || undefined}>
+              <Text size="sm" role="status" className="settings-savebar-status">
+                {notice || (dirty ? "Unsaved changes" : "Saved on this device")}
+              </Text>
+              <Button onClick={save} loading={busy} disabled={busy || !dirty}>
                 Save settings
               </Button>
-            </Group>
+            </div>
           </>
         )}
       </Stack>

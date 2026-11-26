@@ -17,7 +17,10 @@ import type { RatingsProfileDto } from "./skill-profile";
 import { api, bridge } from "@/lib/browser";
 import { languageConfig, type LanguageId } from "@/lib/languages";
 import type { BridgeConnection } from "@/lib/leetcode-bridge";
-import type { Prescription, PrescriptionStatus } from "@/lib/prescription-types";
+import type {
+  Prescription,
+  PrescriptionStatus,
+} from "@/lib/prescription-types";
 import type { PrescriptionOverrideInput } from "@/lib/skill-ratings";
 
 export function useProblemPrescription(
@@ -178,7 +181,11 @@ export default function ProblemPrescription({
   agentSignedIn?: boolean;
   disabled: boolean;
   onOpen: (id: string) => void;
-  onChoose: (slug: string, minutes: number, prescription?: Prescription) => void;
+  onChoose: (
+    slug: string,
+    minutes: number,
+    prescription?: Prescription,
+  ) => void;
   onBrowse: () => void;
   onConnect: () => void;
   onBridgeAction?: () => void;
@@ -187,7 +194,9 @@ export default function ProblemPrescription({
   const p = status.prescription;
   const cfg = languageConfig(p?.language ?? language);
   const loading = busy && !continuation;
-  const [spoilerRevealedId, setSpoilerRevealedId] = useState<string | null>(null);
+  const [spoilerRevealedId, setSpoilerRevealedId] = useState<string | null>(
+    null,
+  );
   const isSelectionTarget = p?.intent?.targetFacet === "selection";
   const spoilerUnlocked =
     !isSelectionTarget ||
@@ -206,7 +215,10 @@ export default function ProblemPrescription({
       curr.prescription?.id === p.id
         ? {
             ...curr,
-            prescription: { ...curr.prescription, selectionSpoilerRevealed: true },
+            prescription: {
+              ...curr.prescription,
+              selectionSpoilerRevealed: true,
+            },
           }
         : curr,
     );
@@ -225,17 +237,20 @@ export default function ProblemPrescription({
       )}
       <h2>
         {continuation?.title ??
-          (loading ? "Choosing your next challenge" : (p?.title ?? "Next problem"))}
+          (loading
+            ? "Choosing your next challenge"
+            : (p?.title ?? "Next problem"))}
       </h2>
       <p className="recommendation-description">
         {continuation?.reason ??
           (loading
-            ? status.job?.stage || "Matching your skill profile with a timed problem from LeetCode."
+            ? // The live stage is shown in the status line below.
+              "Matching your skill profile with a timed problem from LeetCode."
             : (p?.reason ??
               `Pick a timed ${cfg.shortLabel} problem from your connected LeetCode account.`))}
       </p>
       {!continuation && !loading && p?.overrideWarning && (
-        <p className="small">{p.overrideWarning}</p>
+        <p className="prescription-warning">{p.overrideWarning}</p>
       )}
       {loading ? (
         <p className="prescription-status" role="status">
@@ -287,16 +302,18 @@ export default function ProblemPrescription({
                   </div>
                 ))}
                 {!p.evidence.length && (
-                  <p>Calibrating your ratings with a clean independent challenge.</p>
+                  <p>
+                    Calibrating your ratings with a clean independent challenge.
+                  </p>
                 )}
                 <p className="small">
-                  {p.model} · {p.effort} effort · {cfg.shortLabel} and access checked on
-                  LeetCode
+                  {p.model} · {p.effort} effort · {cfg.shortLabel} and access
+                  checked on LeetCode
                 </p>
               </details>
             ) : (
               <div className="prescription-spoiler-gate">
-                <span className="small">
+                <span className="prescription-spoiler-text">
                   Pattern selection challenge: target domain is hidden so you
                   choose the strategy yourself.
                 </span>
@@ -304,7 +321,8 @@ export default function ProblemPrescription({
                   className="text-button"
                   onClick={() => void revealSpoiler()}
                 >
-                  <Eye size={14} /> Reveal why this was chosen (disables Pattern Selection rating)
+                  <Eye size={14} /> Reveal why this was chosen (disables Pattern
+                  Selection rating)
                 </Button>
               </div>
             )}
@@ -321,9 +339,10 @@ export default function ProblemPrescription({
         !ready &&
         bridgeConnection &&
         bridgeConnection.kind !== "checking" && (
-          <p className="small">
+          <p className="prescription-hint">
+            {/* Bridge problems are spelled out in the Connections card beside this one. */}
             {!bridgeConnection.isSignedIn
-              ? `${bridgeConnection.label}. ${bridgeConnection.detail}`
+              ? ""
               : !agentSignedIn && !p
                 ? "ChatGPT sign-in needed to choose a personalized next problem."
                 : ""}
@@ -382,49 +401,46 @@ export default function ProblemPrescription({
             </Button>
           )
         )}
+        {!continuation && (
+          <div className="prescription-actions">
+            {p && (
+              <Button
+                className="text-button"
+                disabled={loading || disabled || !ready}
+                onClick={() => void start(true)}
+              >
+                <RefreshCw size={14} /> Choose another
+              </Button>
+            )}
+            <Button
+              className="text-button"
+              disabled={disabled}
+              onClick={onBrowse}
+            >
+              <BookOpen size={14} /> Browse problems
+            </Button>
+            {ready && (
+              <PrescriptionCoachDrawer
+                language={language}
+                isPremium={isPremium}
+                currentSlug={p?.slug}
+                disabled={loading || disabled}
+                onQuickOverride={async (ov) => {
+                  await start(false, ov);
+                }}
+                onCoachApplied={(nextStatus) => {
+                  if (nextStatus) setStatus(nextStatus);
+                }}
+              />
+            )}
+            {error && !loading && ready && (
+              <Button className="text-button" onClick={() => void start(!!p)}>
+                Try again
+              </Button>
+            )}
+          </div>
+        )}
       </div>
-      {!continuation && (
-        <div className="prescription-actions">
-          {p && (
-            <Button
-              className="text-button"
-              disabled={loading || disabled || !ready}
-              onClick={() => void start(true)}
-            >
-              <RefreshCw size={14} /> Choose another
-            </Button>
-          )}
-          <Button
-            className="text-button"
-            disabled={disabled}
-            onClick={onBrowse}
-          >
-            <BookOpen size={14} /> Browse problems
-          </Button>
-          {ready && (
-            <PrescriptionCoachDrawer
-              language={language}
-              isPremium={isPremium}
-              currentSlug={p?.slug}
-              disabled={loading || disabled}
-              onQuickOverride={async (ov) => {
-                await start(false, ov);
-              }}
-              onCoachApplied={(nextStatus) => {
-                if (nextStatus) setStatus(nextStatus);
-              }}
-            />
-          )}
-          {error && !loading && ready && (
-            <Button
-              className="text-button"
-              onClick={() => void start(!!p)}
-            >
-              Try again
-            </Button>
-          )}
-        </div>
-      )}
     </Panel>
   );
 }

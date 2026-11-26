@@ -8,16 +8,15 @@ import {
   Checkbox,
   Group,
   Modal,
-  Paper,
   Select,
   Stack,
-  Tabs,
   Text,
   Textarea,
   TextInput,
-  Title,
 } from "@mantine/core";
 import { api } from "@/lib/browser";
+import { PageHeader, PageTabPanel, PageTabs } from "./ui";
+import CoachText from "./coach-text";
 import type {
   CoachingMemory,
   MemoryScope,
@@ -39,6 +38,34 @@ const scopes = [
   { value: "planning", label: "Choosing the next activity" },
 ];
 const date = (value: number) => new Date(value).toLocaleString();
+// Long lists render a first batch with a "Show all" control (same treatment as
+// Progress › Earlier practice). Purely presentational; everything is fetched.
+const FIRST_BATCH = 8;
+function ShowAllToggle({
+  total,
+  open,
+  onToggle,
+}: {
+  total: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  if (total <= FIRST_BATCH) return null;
+  return (
+    <li className="memory-list-more">
+      <button
+        type="button"
+        className="earlier-show-all"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        {open
+          ? "Show fewer"
+          : `Show all ${total} (${total - FIRST_BATCH} more)`}
+      </button>
+    </li>
+  );
+}
 export default function CoachMemory({
   onOpen,
 }: {
@@ -56,6 +83,8 @@ export default function CoachMemory({
   const [revisions, setRevisions] = useState<CoachingMemory[]>([]);
   const [correction, setCorrection] = useState<SkillEvidence>();
   const [excluded, setExcluded] = useState(false);
+  const [allEvidence, setAllEvidence] = useState(false);
+  const [allUses, setAllUses] = useState(false);
   const load = async (search = query, includeOlder = older) => {
     const result = await api(
       `/api/memory?q=${encodeURIComponent(search)}&older=${includeOlder}`,
@@ -101,6 +130,7 @@ export default function CoachMemory({
       <Button
         variant="subtle"
         size="compact-sm"
+        className="memory-source-button"
         onClick={() => onOpen(source.attemptId!)}
       >
         Open session · {source.label}
@@ -113,6 +143,7 @@ export default function CoachMemory({
         rel="noreferrer"
         variant="subtle"
         size="compact-sm"
+        className="memory-source-button"
       >
         View source · {source.label}
       </Button>
@@ -125,14 +156,12 @@ export default function CoachMemory({
       </Text>
     );
   return (
-    <div className="page-content">
-      <div className="page-heading compact">
-        <div>
-          <h1>Coach memory</h1>
-          <p>Preferences and skill evidence used by the coach.</p>
-        </div>
-      </div>
-      <Stack gap="lg">
+    <div className="page-content coach-memory-page">
+      <PageHeader
+        title="Coach memory"
+        description="Preferences and skill evidence used by the coach."
+      />
+      <Stack gap="md">
         {error && (
           <Alert color="red" title="Could not save or load memory">
             {error}
@@ -159,318 +188,355 @@ export default function CoachMemory({
             are separate.
           </Alert>
         )}
-        <Text c="dimmed" size="sm">
-          Active preferences guide the next reply. Suggested preferences need
-          your approval. Skill evidence keeps its original context; it is not a
-          mastery score.
-        </Text>
-        <Tabs defaultValue="preferences" keepMounted={false}>
-          <Tabs.List>
-            <Tabs.Tab value="preferences">Preferences</Tabs.Tab>
-            <Tabs.Tab value="evidence">Skill evidence</Tabs.Tab>
-            <Tabs.Tab value="used">What the coach used</Tabs.Tab>
-          </Tabs.List>
-          <Tabs.Panel value="preferences" pt="lg">
-            <Stack gap="md">
-              <Group justify="space-between">
-                <Title order={3}>How you want to be coached</Title>
+        <PageTabs
+          aria-label="Coach memory sections"
+          defaultValue="preferences"
+          tabs={[
+            { value: "preferences", label: "Preferences" },
+            { value: "evidence", label: "Skill evidence" },
+            { value: "used", label: "What the coach used" },
+          ]}
+        >
+          <PageTabPanel value="preferences">
+            <div className="memory-section">
+              <div className="memory-section-header">
+                <div className="memory-section-intro">
+                  <h3>How you want to be coached</h3>
+                  <p>
+                    Active preferences guide the next reply. Suggested
+                    preferences need your approval.
+                  </p>
+                </div>
                 <Button onClick={() => openEditor()}>Add preference</Button>
-              </Group>
-              {!data && <Text c="dimmed">Loading memory…</Text>}
+              </div>
+              {!data && <p className="memory-empty">Loading memory…</p>}
               {data?.preferences.length === 0 && (
-                <Paper p="xl" withBorder>
-                  <Text>
-                    No coaching preferences yet. Add one in your own words.
-                  </Text>
-                </Paper>
+                <p className="memory-empty">
+                  No coaching preferences yet. Add one in your own words.
+                </p>
               )}
-              {data?.preferences.map((memory) => (
-                <Paper key={memory.id} p="lg" withBorder radius="md">
-                  <Stack gap="sm">
-                    <Group justify="space-between">
-                      <Group gap="xs">
+              {!!data?.preferences.length && (
+                <ul className="memory-list">
+                  {data.preferences.map((memory) => (
+                    <li key={memory.id} className="memory-row">
+                      <div className="memory-row-meta">
                         <Badge
+                          size="sm"
+                          variant="light"
                           color={memory.status === "active" ? "teal" : "yellow"}
                         >
                           {memory.status === "active"
                             ? "Active"
                             : "Suggested · not used yet"}
                         </Badge>
-                        <Text size="sm" c="dimmed">
+                        <span>
                           {scopes.find((s) => s.value === memory.scope)?.label}
-                        </Text>
-                      </Group>
-                      <Text size="xs" c="dimmed">
-                        Revision {memory.revision}
-                      </Text>
-                    </Group>
-                    <Text style={{ whiteSpace: "pre-wrap" }}>
-                      {memory.text}
-                    </Text>
-                    <details>
-                      <summary>Why this is here</summary>
-                      <Stack gap="xs" mt="sm">
-                        <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-                          “{memory.source.quote}”
-                        </Text>
-                        {sourceButton(memory.source)}
-                        <Text size="xs" c="dimmed">
-                          {memory.origin === "coach-suggestion"
-                            ? "Suggested from a learner message. Approval is required before use."
-                            : memory.origin === "project-preference"
-                              ? "Seeded from an explicit preference you gave during project design."
-                              : "Written by you."}{" "}
-                          Updated {date(memory.updatedAt)}.
-                        </Text>
-                      </Stack>
-                    </details>
-                    <Group gap="sm">
-                      <Button
-                        variant="light"
-                        size="xs"
-                        onClick={() => openEditor(memory)}
-                      >
-                        {memory.status === "proposed"
-                          ? "Review suggestion"
-                          : "Edit / history"}
-                      </Button>
-                      <Button
-                        variant="subtle"
-                        color="gray"
-                        size="xs"
-                        disabled={busy}
-                        onClick={() =>
-                          act(
-                            {
-                              action: "forget",
-                              id: memory.id,
-                              revision: memory.revision,
-                            },
-                            "Forgotten. This preference will not be included in new coach replies.",
-                          )
-                        }
-                      >
-                        {memory.status === "proposed" ? "Dismiss" : "Forget"}
-                      </Button>
-                    </Group>
-                  </Stack>
-                </Paper>
-              ))}
-              <Text size="xs" c="dimmed">
+                        </span>
+                        <span>Revision {memory.revision}</span>
+                      </div>
+                      <p className="memory-row-text">{memory.text}</p>
+                      <div className="memory-row-footer">
+                        <details className="memory-disclosure">
+                          <summary>Why this is here</summary>
+                          <div className="memory-disclosure-body">
+                            <div className="memory-quote memory-prose">
+                              <CoachText>{`“${memory.source.quote}”`}</CoachText>
+                            </div>
+                            {sourceButton(memory.source)}
+                            <p className="memory-caption">
+                              {memory.origin === "coach-suggestion"
+                                ? "Suggested from a learner message. Approval is required before use."
+                                : memory.origin === "project-preference"
+                                  ? "Seeded from an explicit preference you gave during project design."
+                                  : "Written by you."}{" "}
+                              Updated {date(memory.updatedAt)}.
+                            </p>
+                          </div>
+                        </details>
+                        <Group gap="xs" className="memory-row-actions">
+                          <Button
+                            variant="light"
+                            size="xs"
+                            onClick={() => openEditor(memory)}
+                          >
+                            {memory.status === "proposed"
+                              ? "Review suggestion"
+                              : "Edit / history"}
+                          </Button>
+                          <Button
+                            variant="subtle"
+                            color="gray"
+                            size="xs"
+                            disabled={busy}
+                            onClick={() =>
+                              act(
+                                {
+                                  action: "forget",
+                                  id: memory.id,
+                                  revision: memory.revision,
+                                },
+                                "Forgotten. This preference will not be included in new coach replies.",
+                              )
+                            }
+                          >
+                            {memory.status === "proposed"
+                              ? "Dismiss"
+                              : "Forget"}
+                          </Button>
+                        </Group>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="memory-caption">
                 Forgetting removes the preference and its revision history from
                 current memory. Original conversations and existing backups
                 still preserve their records.
-              </Text>
-            </Stack>
-          </Tabs.Panel>
-          <Tabs.Panel value="evidence" pt="lg">
-            <Stack gap="md">
-              <Title order={3}>What your practice has shown</Title>
-              <Text c="dimmed" size="sm">
-                Search observations across sessions. Correct an interpretation
-                without rewriting your original answer. A correction is shown to
-                the coach as your perspective, not silently converted into a new
-                test result.
-              </Text>
+              </p>
+            </div>
+          </PageTabPanel>
+          <PageTabPanel value="evidence">
+            <div className="memory-section">
+              <div className="memory-section-intro">
+                <h3>What your practice has shown</h3>
+                <p>
+                  Skill evidence keeps its original context; it is not a mastery
+                  score. Search observations across sessions. Correct an
+                  interpretation without rewriting your original answer. A
+                  correction is shown to the coach as your perspective, not
+                  silently converted into a new test result.
+                </p>
+              </div>
               <form
+                className="memory-search"
                 onSubmit={(e) => {
                   e.preventDefault();
+                  setAllEvidence(false);
                   setBusy(true);
                   void load()
                     .catch((e) => setError(String(e)))
                     .finally(() => setBusy(false));
                 }}
               >
-                <Group align="end">
-                  <TextInput
-                    label="Search skill evidence"
-                    placeholder="Map, comparator, time complexity…"
-                    value={query}
-                    onChange={(e) => setQuery(e.currentTarget.value)}
-                    style={{ flex: 1 }}
-                  />
-                  <Button type="submit" loading={busy}>
-                    Search
-                  </Button>
-                </Group>
+                <TextInput
+                  aria-label="Search skill evidence"
+                  placeholder="Search: map, comparator, time complexity…"
+                  value={query}
+                  onChange={(e) => setQuery(e.currentTarget.value)}
+                  className="memory-search-input"
+                />
+                <Button type="submit" variant="default" loading={busy}>
+                  Search
+                </Button>
+                <Checkbox
+                  label="Include earlier assessments"
+                  checked={older}
+                  onChange={(e) => {
+                    const next = e.currentTarget.checked;
+                    setOlder(next);
+                    setAllEvidence(false);
+                    void load(query, next).catch((e) => setError(String(e)));
+                  }}
+                />
               </form>
-              <Checkbox
-                label="Include earlier assessments"
-                checked={older}
-                onChange={(e) => {
-                  const next = e.currentTarget.checked;
-                  setOlder(next);
-                  void load(query, next).catch((e) => setError(String(e)));
-                }}
-              />
+              {!data && <p className="memory-empty">Loading memory…</p>}
               {data?.evidence.length === 0 && (
-                <Paper withBorder p="xl">
-                  <Text>
-                    No matching evidence yet. Completed real practice adds
-                    observations here automatically.
-                  </Text>
-                </Paper>
+                <p className="memory-empty">
+                  No matching evidence yet. Completed real practice adds
+                  observations here automatically.
+                </p>
               )}
-              {data?.evidence.map((evidence) => (
-                <Paper key={evidence.id} withBorder radius="md" p="lg">
-                  <Stack gap="sm">
-                    <Group justify="space-between">
-                      <Text fw={600}>{evidence.skill}</Text>
-                      <Group gap="xs">
-                        <Badge
-                          variant="light"
-                          color={evidence.correction ? "yellow" : "gray"}
-                        >
-                          {evidence.correction?.excluded
-                            ? "Excluded from coaching"
-                            : evidence.correction
-                              ? "Correction attached"
-                              : evidence.kind === "first-response"
-                                ? "First response"
-                                : "Recorded interpretation"}
-                        </Badge>
-                        {!evidence.current && (
-                          <Badge color="gray">Earlier assessment</Badge>
-                        )}
-                      </Group>
-                    </Group>
-                    <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-                      {evidence.observation}
-                    </Text>
-                    <Text size="sm" c="dimmed">
-                      {evidence.outcome} · {evidence.support}
-                    </Text>
-                    {evidence.correction && (
-                      <Alert color="yellow" title="Your correction">
-                        {evidence.correction.text}
-                      </Alert>
-                    )}
-                    <details>
-                      <summary>Inspect evidence and source</summary>
-                      <Stack mt="sm" gap="xs">
-                        {evidence.source.quotes?.map((q, i) => (
-                          <Text
-                            key={i}
+              {!!data?.evidence.length && (
+                <ul className="memory-list">
+                  {(allEvidence
+                    ? data.evidence
+                    : data.evidence.slice(0, FIRST_BATCH)
+                  ).map((evidence) => (
+                    <li key={evidence.id} className="memory-row">
+                      <div className="memory-row-head">
+                        <strong className="memory-row-title">
+                          {evidence.skill}
+                        </strong>
+                        <Group gap={6} className="memory-row-badges">
+                          <Badge
                             size="sm"
-                            style={{ whiteSpace: "pre-wrap" }}
+                            variant="light"
+                            color={evidence.correction ? "yellow" : "gray"}
                           >
-                            Learner: “{q.quote}”
-                          </Text>
-                        ))}
-                        {evidence.source.events?.length ? (
-                          <Text size="sm">
-                            Recording events:{" "}
-                            {evidence.source.events.join(", ")}
-                          </Text>
-                        ) : null}
-                        {sourceButton(evidence.source)}
-                        <Text size="xs" c="dimmed">
-                          {date(evidence.at)}
-                          {evidence.source.model
-                            ? ` · ${evidence.source.model}`
-                            : ""}
-                          {evidence.source.policyVersion
-                            ? ` · ${evidence.source.policyVersion}`
-                            : ""}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          Skill ID: {evidence.skillId}
-                        </Text>
-                      </Stack>
-                    </details>
-                    <Button
-                      variant="light"
-                      size="xs"
-                      w="fit-content"
-                      onClick={() => {
-                        setCorrection(evidence);
-                        setText(evidence.correction?.text ?? "");
-                        setExcluded(evidence.correction?.excluded ?? false);
-                        setError("");
-                      }}
-                    >
-                      Correct this interpretation
-                    </Button>
-                  </Stack>
-                </Paper>
-              ))}
+                            {evidence.correction?.excluded
+                              ? "Excluded from coaching"
+                              : evidence.correction
+                                ? "Correction attached"
+                                : evidence.kind === "first-response"
+                                  ? "First response"
+                                  : "Recorded interpretation"}
+                          </Badge>
+                          {!evidence.current && (
+                            <Badge size="sm" variant="light" color="gray">
+                              Earlier assessment
+                            </Badge>
+                          )}
+                        </Group>
+                      </div>
+                      <div className="memory-row-text memory-prose">
+                        <CoachText>{evidence.observation}</CoachText>
+                      </div>
+                      <p className="memory-caption">
+                        {evidence.outcome} · {evidence.support}
+                      </p>
+                      {evidence.correction && (
+                        <div className="memory-correction">
+                          <strong>Your correction</strong>
+                          <p>{evidence.correction.text}</p>
+                        </div>
+                      )}
+                      <div className="memory-row-footer">
+                        <details className="memory-disclosure">
+                          <summary>Inspect evidence and source</summary>
+                          <div className="memory-disclosure-body">
+                            {evidence.source.quotes?.map((q, i) => (
+                              <p key={i} className="memory-quote">
+                                Learner: “{q.quote}”
+                              </p>
+                            ))}
+                            {evidence.source.events?.length ? (
+                              <p className="memory-quote">
+                                Recording events:{" "}
+                                {evidence.source.events.join(", ")}
+                              </p>
+                            ) : null}
+                            {sourceButton(evidence.source)}
+                            <p className="memory-caption">
+                              {date(evidence.at)}
+                              {evidence.source.model
+                                ? ` · ${evidence.source.model}`
+                                : ""}
+                              {evidence.source.policyVersion
+                                ? ` · ${evidence.source.policyVersion}`
+                                : ""}
+                            </p>
+                            <p className="memory-caption">
+                              Skill ID: {evidence.skillId}
+                            </p>
+                          </div>
+                        </details>
+                        <Button
+                          variant="light"
+                          size="xs"
+                          className="memory-row-actions"
+                          onClick={() => {
+                            setCorrection(evidence);
+                            setText(evidence.correction?.text ?? "");
+                            setExcluded(evidence.correction?.excluded ?? false);
+                            setError("");
+                          }}
+                        >
+                          Correct this interpretation
+                        </Button>
+                      </div>
+                    </li>
+                  ))}
+                  <ShowAllToggle
+                    total={data.evidence.length}
+                    open={allEvidence}
+                    onToggle={() => setAllEvidence((v) => !v)}
+                  />
+                </ul>
+              )}
               {data && data.evidence.length >= 100 && (
-                <Text size="sm" c="dimmed">
+                <p className="memory-caption">
                   Showing the first 100 matches. Narrow your search to find
                   older evidence.
-                </Text>
+                </p>
               )}
-            </Stack>
-          </Tabs.Panel>
-          <Tabs.Panel value="used" pt="lg">
-            <Stack gap="md">
-              <Title order={3}>Context supplied to recent replies</Title>
-              <Text size="sm" c="dimmed">
-                These receipts show which preference revisions and evidence
-                records were supplied. They do not prove how much each item
-                influenced the reply.
-              </Text>
+            </div>
+          </PageTabPanel>
+          <PageTabPanel value="used">
+            <div className="memory-section">
+              <div className="memory-section-intro">
+                <h3>Context supplied to recent replies</h3>
+                <p>
+                  These receipts show which preference revisions and evidence
+                  records were supplied. They do not prove how much each item
+                  influenced the reply.
+                </p>
+              </div>
+              {!data && <p className="memory-empty">Loading memory…</p>}
               {data?.uses.length === 0 && (
-                <Text c="dimmed">
+                <p className="memory-empty">
                   No real coaching replies have used memory yet.
-                </Text>
+                </p>
               )}
-              {data?.uses.map((use) => (
-                <Paper key={use.id} withBorder p="lg">
-                  <Stack gap="sm">
-                    <Group justify="space-between">
-                      <Text fw={600}>{use.role}</Text>
-                      <Text size="sm" c="dimmed">
-                        {date(use.at)}
-                      </Text>
-                    </Group>
-                    {use.preferences.length ? (
-                      use.preferences.map((p) => (
-                        <Text size="sm" key={p.id}>
-                          {p.text ?? "Forgotten preference"} · revision{" "}
-                          {p.revision}
-                        </Text>
-                      ))
-                    ) : (
-                      <Text size="sm" c="dimmed">
-                        No active preferences supplied.
-                      </Text>
-                    )}
-                    <Text size="sm">
-                      {use.evidenceIds.length} historical evidence records
-                      supplied
-                    </Text>
-                    <details>
-                      <summary>Evidence record IDs</summary>
-                      <Text size="xs" style={{ overflowWrap: "anywhere" }}>
-                        {use.evidenceIds.join(" · ") || "None"}
-                      </Text>
-                    </details>
-                    {use.prescription && (
-                      <Text size="sm">
-                        Selected {use.prescription.title}:{" "}
-                        {use.prescription.reason}
-                      </Text>
-                    )}
-                    {use.attemptId && (
-                      <Button
-                        variant="subtle"
-                        size="compact-sm"
-                        w="fit-content"
-                        onClick={() => onOpen(use.attemptId!)}
-                        disabled={
-                          !data?.availableAttemptIds.includes(use.attemptId)
-                        }
-                      >
-                        Open session
-                      </Button>
-                    )}
-                  </Stack>
-                </Paper>
-              ))}
-            </Stack>
-          </Tabs.Panel>
-        </Tabs>
+              {!!data?.uses.length && (
+                <ul className="memory-list">
+                  {(allUses ? data.uses : data.uses.slice(0, FIRST_BATCH)).map(
+                    (use) => (
+                      <li key={use.id} className="memory-row">
+                        <div className="memory-row-head">
+                          <strong className="memory-row-title">
+                            {use.role}
+                          </strong>
+                          <span className="memory-caption">{date(use.at)}</span>
+                        </div>
+                        {use.preferences.map((p) => (
+                          <p className="memory-row-text" key={p.id}>
+                            {p.text ?? "Forgotten preference"} · revision{" "}
+                            {p.revision}
+                          </p>
+                        ))}
+                        {use.prescription && (
+                          <div className="memory-row-text memory-prose">
+                            <CoachText>
+                              {`Selected ${use.prescription.title}: ${use.prescription.reason}`}
+                            </CoachText>
+                          </div>
+                        )}
+                        <p className="memory-caption">
+                          {use.preferences.length
+                            ? ""
+                            : "No active preferences supplied · "}
+                          {use.evidenceIds.length} historical evidence records
+                          supplied
+                        </p>
+                        <div className="memory-row-footer">
+                          <details className="memory-disclosure">
+                            <summary>Evidence record IDs</summary>
+                            <div className="memory-disclosure-body">
+                              <p className="memory-caption memory-ids">
+                                {use.evidenceIds.join(" · ") || "None"}
+                              </p>
+                            </div>
+                          </details>
+                          {use.attemptId && (
+                            <Button
+                              variant="subtle"
+                              size="compact-sm"
+                              className="memory-row-actions"
+                              onClick={() => onOpen(use.attemptId!)}
+                              disabled={
+                                !data?.availableAttemptIds.includes(
+                                  use.attemptId,
+                                )
+                              }
+                            >
+                              Open session
+                            </Button>
+                          )}
+                        </div>
+                      </li>
+                    ),
+                  )}
+                  <ShowAllToggle
+                    total={data.uses.length}
+                    open={allUses}
+                    onToggle={() => setAllUses((v) => !v)}
+                  />
+                </ul>
+              )}
+            </div>
+          </PageTabPanel>
+        </PageTabs>
       </Stack>
       <Modal
         opened={!!edit}
@@ -540,13 +606,19 @@ export default function CoachMemory({
                   Revision history and original source
                 </Accordion.Control>
                 <Accordion.Panel>
-                  <Stack>
+                  <Stack gap="sm" align="flex-start">
                     {revisions.map((r) => (
                       <div key={r.revision}>
-                        <Text size="sm" fw={600}>
+                        <Text size="sm" fw={600} c="var(--text)">
                           Revision {r.revision} · {date(r.updatedAt)}
                         </Text>
-                        <Text size="sm">{r.text}</Text>
+                        <Text
+                          size="sm"
+                          c="var(--text)"
+                          style={{ whiteSpace: "pre-wrap" }}
+                        >
+                          {r.text}
+                        </Text>
                         <Text size="xs" c="dimmed">
                           {r.status === "proposed"
                             ? "Suggested, not active"
@@ -556,7 +628,11 @@ export default function CoachMemory({
                     ))}
                     {edit && edit !== "new" && (
                       <>
-                        <Text size="sm">
+                        <Text
+                          size="sm"
+                          c="var(--text)"
+                          style={{ whiteSpace: "pre-wrap" }}
+                        >
                           Original source: “{edit.source.quote}”
                         </Text>
                         {sourceButton(edit.source)}

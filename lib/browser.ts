@@ -47,7 +47,7 @@ export function bridge<T = any>(
       () =>
         reject(
           new Error(
-            "The browser bridge did not respond. Check Connections before retrying.",
+            "The browser bridge did not respond. Check Settings → Connections before retrying.",
           ),
         ),
       45000,

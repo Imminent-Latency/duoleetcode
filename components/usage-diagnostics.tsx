@@ -1,17 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import {
-  Badge,
-  Button,
-  Group,
-  Paper,
-  SegmentedControl,
-  SimpleGrid,
-  Stack,
-  Table,
-  Text,
-  Title,
-} from "@mantine/core";
+import { Badge, Button, Select, Table } from "@mantine/core";
 import { RefreshCw } from "lucide-react";
 import { api } from "@/lib/browser";
 import type {
@@ -40,73 +29,108 @@ function BucketTable({
   windowTotalTokens: number;
 }) {
   return (
-    <Paper withBorder radius="md" p="lg">
-      <Stack gap="sm">
-        <div>
-          <Title order={4}>{title}</Title>
-          <Text size="sm" c="dimmed">
-            {subtitle}
-          </Text>
+    <section className="usage-panel">
+      <div className="usage-panel-heading">
+        <h3>{title}</h3>
+        <p>{subtitle}</p>
+      </div>
+      {rows.length === 0 ? (
+        <p className="usage-empty">
+          No completed model calls recorded in this window yet.
+        </p>
+      ) : (
+        <div className="usage-table-scroll">
+          <Table
+            className="usage-table"
+            striped
+            highlightOnHover
+            verticalSpacing={6}
+            horizontalSpacing="sm"
+          >
+            <colgroup>
+              <col />
+              <col className="usage-col-calls" />
+              <col className="usage-col-num" />
+              <col className="usage-col-share" />
+              <col className="usage-col-wide" />
+              <col className="usage-col-wide" />
+              <col className="usage-col-time" />
+            </colgroup>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Name</Table.Th>
+                <Table.Th ta="right">Calls</Table.Th>
+                <Table.Th ta="right">Total tokens</Table.Th>
+                <Table.Th ta="right">Share</Table.Th>
+                <Table.Th ta="right">Input (cached)</Table.Th>
+                <Table.Th ta="right">Output (reasoning)</Table.Th>
+                <Table.Th ta="right">Time</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {rows.map((r) => {
+                const share =
+                  windowTotalTokens > 0
+                    ? Math.round((r.totalTokens / windowTotalTokens) * 100)
+                    : 0;
+                return (
+                  <Table.Tr key={r.key}>
+                    <Table.Td>
+                      <span className="usage-name">{r.label}</span>
+                      {r.failedCalls > 0 && (
+                        <Badge ml="xs" color="red" variant="light" size="sm">
+                          {r.failedCalls} failed
+                        </Badge>
+                      )}
+                    </Table.Td>
+                    <Table.Td ta="right">{fmt(r.calls)}</Table.Td>
+                    <Table.Td ta="right">{fmt(r.totalTokens)}</Table.Td>
+                    <Table.Td ta="right">{share}%</Table.Td>
+                    <Table.Td ta="right">
+                      {fmt(r.inputTokens)}
+                      {r.cachedInputTokens > 0 && (
+                        <span className="usage-sub">
+                          {" "}
+                          ({fmt(r.cachedInputTokens)})
+                        </span>
+                      )}
+                    </Table.Td>
+                    <Table.Td ta="right">
+                      {fmt(r.outputTokens)}
+                      {r.reasoningTokens > 0 && (
+                        <span className="usage-sub">
+                          {" "}
+                          ({fmt(r.reasoningTokens)})
+                        </span>
+                      )}
+                    </Table.Td>
+                    <Table.Td ta="right">{fmtDuration(r.durationMs)}</Table.Td>
+                  </Table.Tr>
+                );
+              })}
+            </Table.Tbody>
+          </Table>
         </div>
-        {rows.length === 0 ? (
-          <Text size="sm" c="dimmed">
-            No completed model calls recorded in this window yet.
-          </Text>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <Table striped highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Name</Table.Th>
-                  <Table.Th ta="right">Calls</Table.Th>
-                  <Table.Th ta="right">Total tokens</Table.Th>
-                  <Table.Th ta="right">Share</Table.Th>
-                  <Table.Th ta="right">Input (cached)</Table.Th>
-                  <Table.Th ta="right">Output (reasoning)</Table.Th>
-                  <Table.Th ta="right">Time</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {rows.map((r) => {
-                  const share =
-                    windowTotalTokens > 0
-                      ? Math.round((r.totalTokens / windowTotalTokens) * 100)
-                      : 0;
-                  return (
-                    <Table.Tr key={r.key}>
-                      <Table.Td>
-                        <strong>{r.label}</strong>
-                        {r.failedCalls > 0 && (
-                          <Badge ml="xs" color="red" variant="light" size="xs">
-                            {r.failedCalls} failed
-                          </Badge>
-                        )}
-                      </Table.Td>
-                      <Table.Td ta="right">{fmt(r.calls)}</Table.Td>
-                      <Table.Td ta="right">{fmt(r.totalTokens)}</Table.Td>
-                      <Table.Td ta="right">{share}%</Table.Td>
-                      <Table.Td ta="right">
-                        {fmt(r.inputTokens)}
-                        {r.cachedInputTokens > 0
-                          ? ` (${fmt(r.cachedInputTokens)})`
-                          : ""}
-                      </Table.Td>
-                      <Table.Td ta="right">
-                        {fmt(r.outputTokens)}
-                        {r.reasoningTokens > 0
-                          ? ` (${fmt(r.reasoningTokens)})`
-                          : ""}
-                      </Table.Td>
-                      <Table.Td ta="right">{fmtDuration(r.durationMs)}</Table.Td>
-                    </Table.Tr>
-                  );
-                })}
-              </Table.Tbody>
-            </Table>
-          </div>
-        )}
-      </Stack>
-    </Paper>
+      )}
+    </section>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <div className="usage-stat">
+      <span className="usage-stat-label">{label}</span>
+      <strong className="usage-stat-value">{value}</strong>
+      <span className="usage-stat-detail">{detail}</span>
+    </div>
   );
 }
 
@@ -138,24 +162,40 @@ export default function UsageDiagnostics() {
     summary?.windows[0];
 
   return (
-    <Stack gap="lg" mt="md">
-      <Group justify="space-between" wrap="wrap" gap="md">
-        <div>
-          <Title order={3}>Model &amp; feature usage</Title>
-          <Text size="sm" c="dimmed">
+    <div className="diag-view">
+      <div className="diag-view-header">
+        <div className="diag-view-intro">
+          <h3>Model &amp; feature usage</h3>
+          <p>
             Compact token and call totals across rolling plan windows. Clearing
             raw diagnostic logs preserves these usage totals.
-          </Text>
+          </p>
         </div>
-        <Group gap="sm" wrap="wrap">
-          <SegmentedControl
+        <div className="diag-filters">
+          <Select
+            aria-label="Usage time window"
+            className="diag-filter diag-filter-wide"
+            value={windowKey}
+            allowDeselect={false}
+            onChange={(v) => v && setWindowKey(v as UsageWindowKey)}
+            data={[
+              { label: "Last 5 hours", value: "last5h" },
+              { label: "Last 24 hours", value: "last24h" },
+              { label: "Last 7 days", value: "last7d" },
+              { label: "Last 30 days", value: "last30d" },
+              { label: "All recorded", value: "allTime" },
+            ]}
+          />
+          <Select
             aria-label="Usage session mode"
+            className="diag-filter"
             value={mode}
-            onChange={(v) => setMode(v as "practice" | "test" | "all")}
+            allowDeselect={false}
+            onChange={(v) => v && setMode(v as "practice" | "test" | "all")}
             data={[
               { label: "Practice", value: "practice" },
               { label: "Test", value: "test" },
-              { label: "All", value: "all" },
+              { label: "All modes", value: "all" },
             ]}
           />
           <Button
@@ -166,80 +206,55 @@ export default function UsageDiagnostics() {
           >
             Refresh
           </Button>
-        </Group>
-      </Group>
+        </div>
+      </div>
 
-      {error && <Text c="red">{error}</Text>}
+      {error && (
+        <div className="banner error" role="alert">
+          {error}
+        </div>
+      )}
 
-      <SegmentedControl
-        aria-label="Usage time window"
-        value={windowKey}
-        onChange={(v) => setWindowKey(v as UsageWindowKey)}
-        data={[
-          { label: "Last 5 hours", value: "last5h" },
-          { label: "Last 24 hours", value: "last24h" },
-          { label: "Last 7 days", value: "last7d" },
-          { label: "Last 30 days", value: "last30d" },
-          { label: "All recorded", value: "allTime" },
-        ]}
-      />
+      {!current && !error && (
+        <p className="diag-empty-line">
+          {busy ? "Loading usage…" : "No usage recorded yet."}
+        </p>
+      )}
 
       {current && (
         <>
-          <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="md">
-            <Paper withBorder radius="md" p="md">
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                Calls ({current.label})
-              </Text>
-              <Title order={2} mt={4}>
-                {fmt(current.calls)}
-              </Title>
-              <Text size="xs" c="dimmed" mt={4}>
-                {fmt(current.succeededCalls)} succeeded
-                {current.failedCalls > 0
+          <div className="usage-stats">
+            <Stat
+              label={`Calls (${current.label})`}
+              value={fmt(current.calls)}
+              detail={`${fmt(current.succeededCalls)} succeeded${
+                current.failedCalls > 0
                   ? ` · ${fmt(current.failedCalls)} failed`
-                  : ""}
-              </Text>
-            </Paper>
-            <Paper withBorder radius="md" p="md">
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                Total tokens
-              </Text>
-              <Title order={2} mt={4}>
-                {fmt(current.totalTokens)}
-              </Title>
-              <Text size="xs" c="dimmed" mt={4}>
-                {fmt(current.inputTokens)} in · {fmt(current.outputTokens)} out
-              </Text>
-            </Paper>
-            <Paper withBorder radius="md" p="md">
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                Average per session
-              </Text>
-              <Title order={2} mt={4}>
-                {current.sessions
-                  ? `${current.avgCallsPerSession} calls`
-                  : "-"}
-              </Title>
-              <Text size="xs" c="dimmed" mt={4}>
-                {current.sessions
+                  : ""
+              }`}
+            />
+            <Stat
+              label="Total tokens"
+              value={fmt(current.totalTokens)}
+              detail={`${fmt(current.inputTokens)} in · ${fmt(current.outputTokens)} out`}
+            />
+            <Stat
+              label="Average per session"
+              value={
+                current.sessions ? `${current.avgCallsPerSession} calls` : "-"
+              }
+              detail={
+                current.sessions
                   ? `${fmt(current.avgTokensPerSession)} tokens · ${fmt(current.sessions)} session${current.sessions === 1 ? "" : "s"}`
-                  : "No session-linked calls in window"}
-              </Text>
-            </Paper>
-            <Paper withBorder radius="md" p="md">
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                Cumulative runtime
-              </Text>
-              <Title order={2} mt={4}>
-                {fmtDuration(current.durationMs)}
-              </Title>
-              <Text size="xs" c="dimmed" mt={4}>
-                {fmt(current.reasoningTokens)} reasoning ·{" "}
-                {fmt(current.cachedInputTokens)} cached in
-              </Text>
-            </Paper>
-          </SimpleGrid>
+                  : "No session-linked calls in window"
+              }
+            />
+            <Stat
+              label="Cumulative runtime"
+              value={fmtDuration(current.durationMs)}
+              detail={`${fmt(current.reasoningTokens)} reasoning · ${fmt(current.cachedInputTokens)} cached in`}
+            />
+          </div>
 
           <BucketTable
             title="By user-facing feature"
@@ -256,6 +271,6 @@ export default function UsageDiagnostics() {
           />
         </>
       )}
-    </Stack>
+    </div>
   );
 }

@@ -66,15 +66,15 @@ export function ReviewFlagProvider({ children }: { children: ReactNode }) {
         size="md"
         returnFocus
       >
-        <Stack>
-          <p className="small">
+        <Stack gap="sm">
+          <p className="review-flag-intro">
             Save a note with this{" "}
             {draft?.target.kind === "editor" ? "editor snapshot" : "item"} and
             its available diagnostic context. You can keep practicing after
             saving.
           </p>
           {draft?.target.kind === "editor" && (
-            <p className="small">
+            <p className="review-flag-intro">
               Cursor: line {draft.target.editor.cursor.line}, column{" "}
               {draft.target.editor.cursor.column}
               {draft.target.editor.selection ? " · Selected code included" : ""}

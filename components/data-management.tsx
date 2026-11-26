@@ -14,7 +14,6 @@ import {
   Select,
   Stack,
   Table,
-  Tabs,
   Text,
   TextInput,
   Title,
@@ -35,6 +34,7 @@ import {
 import type { DataPreview } from "@/lib/snapshots";
 import type { Attempt } from "@/lib/types";
 import { SavedSession } from "./practice-library";
+import { SectionSwitch } from "./ui";
 const when = (s: string | number) => new Date(s).toLocaleString();
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -159,7 +159,7 @@ export default function DataManagement({
     });
   if (inspect)
     return (
-      <div className="page-content">
+      <div className="settings-subpage">
         <SavedSession
           key={inspect.id}
           attempt={inspect}
@@ -171,38 +171,39 @@ export default function DataManagement({
       </div>
     );
   return (
-    <div className="page-content">
-      <div className="page-heading compact">
-        <div>
-          <h1>Snapshots & data</h1>
-          <p>Export, restore, or reset local practice data.</p>
-        </div>
-      </div>
-      <Stack gap="lg">
+    <div className="settings-subpage data-page">
+      <p className="subpage-description">
+        Export, restore, or reset local practice data.
+      </p>
+      <Stack gap="md">
         {error && (
           <Alert color="red" title="Could not complete this action">
             {error}
           </Alert>
         )}
         {notice && <Alert color="teal">{notice}</Alert>}
-        <Paper withBorder p="lg">
-          <Stack>
-            <Title order={3}>Save everything as a snapshot</Title>
-            <Text size="sm" c="dimmed">
+        <Paper withBorder className="settings-card">
+          <div className="settings-card-heading">
+            <Title order={3} className="settings-section-title">
+              Save everything as a snapshot
+            </Title>
+            <Text className="settings-help">
               Includes practice and test sessions, recordings, results,
               coaching, skill evidence and corrections, coach preferences, agent
               settings, and this browser’s layouts and reflection drafts.
               Sign-ins stay connected and are never exported.
             </Text>
-            <Group align="end">
-              <TextInput
-                style={{ flex: 1, minWidth: 200 }}
-                label="Snapshot name"
-                placeholder="Before trying a different coaching approach"
-                value={name}
-                maxLength={160}
-                onChange={(e) => setName(e.currentTarget.value)}
-              />
+          </div>
+          <div className="snapshot-create">
+            <TextInput
+              className="snapshot-name"
+              label="Snapshot name"
+              placeholder="Before trying a different coaching approach"
+              value={name}
+              maxLength={160}
+              onChange={(e) => setName(e.currentTarget.value)}
+            />
+            <div className="snapshot-create-actions">
               <Button
                 leftSection={<Archive size={16} />}
                 loading={busy}
@@ -222,16 +223,16 @@ export default function DataManagement({
                   </Button>
                 )}
               </FileButton>
-            </Group>
-            <Text size="xs" c="dimmed">
-              Captures the last saved state. Copies stay on this device.
-              Download a snapshot to keep it elsewhere. Browser recovery queues
-              and live connection handles are temporary state, not snapshot
-              contents.
-            </Text>
-          </Stack>
+            </div>
+          </div>
+          <Text className="settings-caption">
+            Captures the last saved state. Copies stay on this device. Download
+            a snapshot to keep it elsewhere. Browser recovery queues and live
+            connection handles are temporary state, not snapshot contents.
+          </Text>
         </Paper>
-        <Tabs
+        <SectionSwitch
+          aria-label="Snapshot actions"
           value={mode}
           onChange={(v) => {
             if (v === "reset")
@@ -247,207 +248,227 @@ export default function DataManagement({
               setSource(undefined);
             }
           }}
-        >
-          <Tabs.List>
-            <Tabs.Tab value="restore">Saved snapshots</Tabs.Tab>
-            <Tabs.Tab value="reset">Start fresh</Tabs.Tab>
-          </Tabs.List>
-        </Tabs>
+          data={[
+            { value: "restore", label: "Saved snapshots" },
+            { value: "reset", label: "Start fresh" },
+          ]}
+        />
         {mode === "restore" && (
-          <Paper withBorder p="lg">
-            <Stack>
-              <Title order={3}>Your snapshot shelf</Title>
-              {!snapshots.length && (
-                <Text c="dimmed">
-                  Save your first snapshot before trying a different setup.
-                </Text>
-              )}
-              {snapshots.map((s) => (
-                <Group key={s.id} justify="space-between" wrap="wrap">
-                  <div>
-                    <Text fw={600}>{s.name}</Text>
-                    <Text size="sm" c="dimmed">
-                      {when(s.createdAt)} · {s.practice} practice · {s.sandbox}{" "}
-                      test · {(s.bytes / 1024).toFixed(0)} KB
-                    </Text>
+          <Paper withBorder className="settings-card">
+            <Title order={3} className="settings-section-title">
+              Your snapshot shelf
+            </Title>
+            {!snapshots.length && (
+              <Text className="settings-help">
+                Save your first snapshot before trying a different setup.
+              </Text>
+            )}
+            {snapshots.length > 0 && (
+              <div className="snapshot-shelf">
+                {snapshots.map((s) => (
+                  <div key={s.id} className="snapshot-row">
+                    <div className="snapshot-row-text">
+                      <Text fw={600} className="snapshot-row-name">
+                        {s.name}
+                      </Text>
+                      <Text className="settings-caption">
+                        {when(s.createdAt)} · {s.practice} practice ·{" "}
+                        {s.sandbox} test · {(s.bytes / 1024).toFixed(0)} KB
+                      </Text>
+                    </div>
+                    <Group
+                      gap="xs"
+                      wrap="nowrap"
+                      className="snapshot-row-actions"
+                    >
+                      <Button
+                        variant="light"
+                        size="xs"
+                        disabled={busy}
+                        onClick={() =>
+                          task(async () =>
+                            pick(
+                              (await api(`/api/data?id=${s.id}`)).snapshot,
+                              "restore",
+                            ),
+                          )
+                        }
+                      >
+                        Review & restore
+                      </Button>
+                      <Button
+                        component="a"
+                        href={`/api/data?id=${s.id}&download=1`}
+                        variant="subtle"
+                        size="xs"
+                        leftSection={<Download size={15} />}
+                      >
+                        Download
+                      </Button>
+                    </Group>
                   </div>
-                  <Group gap="xs">
-                    <Button
-                      variant="light"
-                      disabled={busy}
-                      onClick={() =>
-                        task(async () =>
-                          pick(
-                            (await api(`/api/data?id=${s.id}`)).snapshot,
-                            "restore",
-                          ),
-                        )
-                      }
-                    >
-                      Review & restore
-                    </Button>
-                    <Button
-                      component="a"
-                      href={`/api/data?id=${s.id}&download=1`}
-                      variant="subtle"
-                      leftSection={<Download size={15} />}
-                    >
-                      Download
-                    </Button>
-                  </Group>
-                </Group>
-              ))}
-            </Stack>
+                ))}
+              </div>
+            )}
           </Paper>
         )}
         {source && (
-          <Paper withBorder p="lg">
-            <Stack gap="lg">
-              <div>
-                <Group>
-                  <Badge color={mode === "reset" ? "orange" : "teal"}>
-                    {mode === "reset" ? "Live library" : "Read-only snapshot"}
-                  </Badge>
-                  <Text size="sm" c="dimmed">
-                    {when(source.createdAt)}
-                  </Text>
-                </Group>
-                <Title order={3} mt="sm">
-                  {mode === "reset" ? "Choose what to clear" : source.name}
-                </Title>
-                <Text c="dimmed" size="sm">
-                  {mode === "reset"
-                    ? "Only selected data will be removed. Saved snapshots remain available. A recovery snapshot is also saved before applying."
-                    : "Review any session without importing it. Select only the parts you want back in your live library."}
+          <Paper withBorder className="settings-card">
+            <div className="settings-card-heading">
+              <Group gap="sm">
+                <Badge color={mode === "reset" ? "orange" : "teal"}>
+                  {mode === "reset" ? "Live library" : "Read-only snapshot"}
+                </Badge>
+                <Text size="sm" c="dimmed">
+                  {when(source.createdAt)}
                 </Text>
-              </div>
-              <Group>
-                <Button
-                  variant="light"
-                  onClick={() => setSelection(selectEverything(source))}
-                >
-                  Select everything
-                </Button>
-                <Button
-                  variant="subtle"
-                  onClick={() => setSelection(emptySelection())}
-                >
-                  Clear selection
-                </Button>
               </Group>
-              {mode === "reset" ? (
-                <Select
-                  label="For selected sessions"
-                  value={attemptMode}
-                  allowDeselect={false}
-                  onChange={(v) => setAttemptMode(v as typeof attemptMode)}
-                  data={[
-                    { value: "whole", label: "Remove entire sessions" },
-                    {
-                      value: "coaching",
-                      label:
-                        "Clear coaching only (keep solutions, recordings, and judge results)",
-                    },
-                  ]}
-                />
-              ) : (
-                <Select
-                  label="If a selected record already exists"
-                  value={conflicts}
-                  allowDeselect={false}
-                  onChange={(v) => setConflicts(v as typeof conflicts)}
-                  data={[
-                    { value: "keep", label: "Keep my current version" },
-                    {
-                      value: "replace",
-                      label: "Replace it with the snapshot version",
-                    },
-                  ]}
-                />
-              )}
-              <LibraryChoices
-                title="Practice"
-                library={source.practice}
-                value={selection.practice}
-                onChange={(practice) =>
-                  setSelection({ ...selection, practice })
-                }
-                onInspect={setInspect}
-                restoring={mode === "restore"}
-              />
-              <LibraryChoices
-                title="Test sessions"
-                library={source.sandbox}
-                value={selection.sandbox}
-                onChange={(sandbox) => setSelection({ ...selection, sandbox })}
-                onInspect={setInspect}
-                restoring={mode === "restore"}
-                sandbox
-              />
-              <Checkbox
-                label="Agent settings"
-                description={
-                  mode === "reset"
-                    ? "Return all features to the Low preset."
-                    : "Use the model and effort choices saved in this snapshot."
-                }
-                checked={selection.settings}
-                disabled={!source.settings}
-                onChange={(e) =>
-                  setSelection({
-                    ...selection,
-                    settings: e.currentTarget.checked,
-                  })
-                }
-              />
-              {!!source.settings && (
-                <Text size="xs" c="dimmed">
-                  {Object.entries(source.settings.features)
-                    .map(([role, s]) => `${role}: ${s.model} / ${s.effort}`)
-                    .join(" · ")}
-                </Text>
-              )}
-              <Checkbox
-                label="This browser’s layouts and reflection drafts"
-                description={`${Object.keys(source.browser).length} saved values. Other browsers keep their own layout preferences.`}
-                checked={selection.browser}
-                onChange={(e) =>
-                  setSelection({
-                    ...selection,
-                    browser: e.currentTarget.checked,
-                  })
-                }
-              />
-              <Checkbox
-                label="Staged Pages import preview"
-                description="The saved proposal only. Does not import historical Pages sessions."
-                checked={selection.pagesPreview}
-                disabled={!source.pagesPreview}
-                onChange={(e) =>
-                  setSelection({
-                    ...selection,
-                    pagesPreview: e.currentTarget.checked,
-                  })
-                }
-              />
-              <Text size="sm" c="dimmed">
-                Skill evidence and coaching are selected separately. Keeping
-                evidence after clearing its session preserves the observation
-                and source excerpts; the full recording remains available in
-                your snapshot. Progress totals continue to reflect the sessions
-                in your live library.
+              <Title
+                order={3}
+                className="settings-section-title snapshot-source-title"
+              >
+                {mode === "reset" ? "Choose what to clear" : source.name}
+              </Title>
+              <Text className="settings-help">
+                {mode === "reset"
+                  ? "Only selected data will be removed. Saved snapshots remain available. A recovery snapshot is also saved before applying."
+                  : "Review any session without importing it. Select only the parts you want back in your live library."}
               </Text>
-              <Group justify="flex-end">
-                <Button
-                  loading={busy}
-                  color={mode === "reset" ? "orange" : "teal"}
-                  leftSection={<RotateCcw size={16} />}
-                  onClick={makePreview}
-                >
-                  {mode === "reset" ? "Preview reset" : "Preview restore"}
-                </Button>
-              </Group>
-            </Stack>
+            </div>
+            <Group gap="xs">
+              <Button
+                variant="light"
+                size="xs"
+                onClick={() => setSelection(selectEverything(source))}
+              >
+                Select everything
+              </Button>
+              <Button
+                variant="subtle"
+                size="xs"
+                onClick={() => setSelection(emptySelection())}
+              >
+                Clear selection
+              </Button>
+            </Group>
+            {mode === "reset" ? (
+              <Select
+                className="data-select"
+                comboboxProps={{
+                  classNames: { dropdown: "settings-dropdown" },
+                }}
+                label="For selected sessions"
+                value={attemptMode}
+                allowDeselect={false}
+                onChange={(v) => setAttemptMode(v as typeof attemptMode)}
+                data={[
+                  { value: "whole", label: "Remove entire sessions" },
+                  {
+                    value: "coaching",
+                    label:
+                      "Clear coaching only (keep solutions, recordings, and judge results)",
+                  },
+                ]}
+              />
+            ) : (
+              <Select
+                className="data-select"
+                comboboxProps={{
+                  classNames: { dropdown: "settings-dropdown" },
+                }}
+                label="If a selected record already exists"
+                value={conflicts}
+                allowDeselect={false}
+                onChange={(v) => setConflicts(v as typeof conflicts)}
+                data={[
+                  { value: "keep", label: "Keep my current version" },
+                  {
+                    value: "replace",
+                    label: "Replace it with the snapshot version",
+                  },
+                ]}
+              />
+            )}
+            <LibraryChoices
+              title="Practice"
+              library={source.practice}
+              value={selection.practice}
+              onChange={(practice) => setSelection({ ...selection, practice })}
+              onInspect={setInspect}
+              restoring={mode === "restore"}
+            />
+            <LibraryChoices
+              title="Test sessions"
+              library={source.sandbox}
+              value={selection.sandbox}
+              onChange={(sandbox) => setSelection({ ...selection, sandbox })}
+              onInspect={setInspect}
+              restoring={mode === "restore"}
+              sandbox
+            />
+            <Checkbox
+              label="Agent settings"
+              description={
+                mode === "reset"
+                  ? "Return all features to the Low preset."
+                  : "Use the model and effort choices saved in this snapshot."
+              }
+              checked={selection.settings}
+              disabled={!source.settings}
+              onChange={(e) =>
+                setSelection({
+                  ...selection,
+                  settings: e.currentTarget.checked,
+                })
+              }
+            />
+            {!!source.settings && (
+              <Text className="settings-caption data-settings-summary">
+                {Object.entries(source.settings.features)
+                  .map(([role, s]) => `${role}: ${s.model} / ${s.effort}`)
+                  .join(" · ")}
+              </Text>
+            )}
+            <Checkbox
+              label="This browser’s layouts and reflection drafts"
+              description={`${Object.keys(source.browser).length} saved values. Other browsers keep their own layout preferences.`}
+              checked={selection.browser}
+              onChange={(e) =>
+                setSelection({
+                  ...selection,
+                  browser: e.currentTarget.checked,
+                })
+              }
+            />
+            <Checkbox
+              label="Staged Pages import preview"
+              description="The saved proposal only. Does not import historical Pages sessions."
+              checked={selection.pagesPreview}
+              disabled={!source.pagesPreview}
+              onChange={(e) =>
+                setSelection({
+                  ...selection,
+                  pagesPreview: e.currentTarget.checked,
+                })
+              }
+            />
+            <Text className="settings-caption">
+              Skill evidence and coaching are selected separately. Keeping
+              evidence after clearing its session preserves the observation and
+              source excerpts; the full recording remains available in your
+              snapshot. Progress totals continue to reflect the sessions in your
+              live library.
+            </Text>
+            <Group justify="flex-end">
+              <Button
+                loading={busy}
+                color={mode === "reset" ? "orange" : "teal"}
+                leftSection={<RotateCcw size={16} />}
+                onClick={makePreview}
+              >
+                {mode === "reset" ? "Preview reset" : "Preview restore"}
+              </Button>
+            </Group>
           </Paper>
         )}
       </Stack>
@@ -584,9 +605,11 @@ function LibraryChoices({
     />
   );
   return (
-    <Paper withBorder p="md">
-      <Stack>
-        <Title order={4}>{title}</Title>
+    <Paper withBorder radius="md" className="library-choices">
+      <Stack gap="sm">
+        <Title order={4} className="library-choices-title">
+          {title}
+        </Title>
         {group(
           "attempts",
           library.attempts.map((a) => a.id),
@@ -615,7 +638,14 @@ function LibraryChoices({
                 a.problem.title.toLowerCase().includes(query.toLowerCase()),
               )
               .map((a) => (
-                <Group key={a.id} justify="space-between" ml="lg">
+                <Group
+                  key={a.id}
+                  justify="space-between"
+                  wrap="nowrap"
+                  gap="sm"
+                  ml="lg"
+                  className="library-session-row"
+                >
                   <Checkbox
                     checked={value.attempts.includes(a.id)}
                     onChange={(e) =>
@@ -645,7 +675,11 @@ function LibraryChoices({
                 onChange({ ...value, preferences: e.currentTarget.checked })
               }
             />
-            <Accordion variant="contained">
+            <Accordion
+              variant="contained"
+              radius="sm"
+              className="library-accordion"
+            >
               <Accordion.Item value="preferences">
                 <Accordion.Control>Inspect saved preferences</Accordion.Control>
                 <Accordion.Panel>
@@ -671,7 +705,11 @@ function LibraryChoices({
               library.memory.evidence.map((e) => e.id),
               "Skill evidence and corrections",
             )}
-            <Accordion variant="contained">
+            <Accordion
+              variant="contained"
+              radius="sm"
+              className="library-accordion"
+            >
               <Accordion.Item value="evidence">
                 <Accordion.Control>
                   Choose individual skill observations
@@ -717,7 +755,11 @@ function LibraryChoices({
               library.importedEvidence.map((e) => e.id),
               "Imported historical notes",
             )}
-            <Accordion variant="contained">
+            <Accordion
+              variant="contained"
+              radius="sm"
+              className="library-accordion"
+            >
               <Accordion.Item value="notes">
                 <Accordion.Control>Choose imported notes</Accordion.Control>
                 <Accordion.Panel>

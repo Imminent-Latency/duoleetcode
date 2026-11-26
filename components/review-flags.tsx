@@ -90,116 +90,147 @@ export default function ReviewFlags({ initialId }: { initialId?: string }) {
     captured?.selectedItem?.summary ??
     captured?.prescription?.reason;
   return (
-    <section className="diagnostics-page">
-      <h1>Flagged for review</h1>
-      <p>
-        Your notes and captured context stay here until you revisit them. Copies
-        of traces are kept even after normal diagnostic logs expire or are
-        cleared.
-      </p>
-      <p className="small">
-        These are product feedback, separate from coach memory and skill
-        evidence. They are not included in practice snapshots; download a review
-        bundle to keep a portable copy.
-      </p>
+    <section className="diagnostics-page diag-view">
+      <div className="diag-view-header">
+        <div className="diag-view-intro">
+          <h3>Flagged for review</h3>
+          <p>
+            Your notes and captured context stay here until you revisit them.
+            Copies of traces are kept even after normal diagnostic logs expire
+            or are cleared.
+          </p>
+          <p className="diag-view-note">
+            These are product feedback, separate from coach memory and skill
+            evidence. They are not included in practice snapshots; download a
+            review bundle to keep a portable copy.
+          </p>
+        </div>
+        <div className="diag-filters">
+          <Select
+            aria-label="Show"
+            className="diag-filter"
+            data={[
+              { value: "", label: "All flags" },
+              { value: "open", label: "Open" },
+              { value: "resolved", label: "Reviewed" },
+            ]}
+            value={status}
+            allowDeselect={false}
+            onChange={(v) => {
+              setStatus(v ?? "");
+              setOffset(0);
+            }}
+          />
+          <Button
+            variant="default"
+            onClick={() => void load().catch((e) => setError(e.message))}
+          >
+            Refresh flags
+          </Button>
+        </div>
+      </div>
       {error && (
-        <p className="error-text" role="alert">
+        <div className="banner error" role="alert">
           {error}
-        </p>
+        </div>
       )}
-      <Group my="lg">
-        <Select
-          label="Show"
-          data={[
-            { value: "", label: "All flags" },
-            { value: "open", label: "Open" },
-            { value: "resolved", label: "Reviewed" },
-          ]}
-          value={status}
-          allowDeselect={false}
-          onChange={(v) => {
-            setStatus(v ?? "");
-            setOffset(0);
-          }}
-        />
-        <Button
-          variant="default"
-          onClick={() => void load().catch((e) => setError(e.message))}
-        >
-          Refresh flags
-        </Button>
-      </Group>
       <div className="diagnostics-grid">
-        <aside className="diagnostic-list">
-          <p>{total} flags</p>
-          {!flags.length && (
-            <p>
-              Use “Flag for review” beside a reply or recommendation, or in the
-              editor.
-            </p>
+        <aside className="diagnostic-list" aria-label="Review flags">
+          <p className="diagnostic-count">{total} flags</p>
+          <div className="diagnostic-list-body">
+            {!flags.length && (
+              <p className="diag-empty-line">
+                Use “Flag for review” beside a reply or recommendation, or in
+                the editor.
+              </p>
+            )}
+            {flags.map((f) => (
+              <button
+                type="button"
+                className={`diagnostic-run ${selected === f.id ? "selected" : ""}`}
+                aria-current={selected === f.id ? "true" : undefined}
+                key={f.id}
+                onClick={() => setSelected(f.id)}
+              >
+                <span className="diagnostic-run-head">
+                  <strong>{f.title}</strong>
+                  <Badge
+                    size="xs"
+                    variant="light"
+                    className="diag-status"
+                    color={f.status === "resolved" ? "teal" : "yellow"}
+                  >
+                    {f.status === "resolved" ? "Reviewed" : "Open"}
+                  </Badge>
+                </span>
+                <small>
+                  {f.category} · {f.mode} ·{" "}
+                  {new Date(f.createdAt).toLocaleString()}
+                </small>
+                {f.note && (
+                  <span className="review-flag-row-note">
+                    {f.note.slice(0, 120)}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          {(offset > 0 || offset + 50 < total) && (
+            <Group justify="space-between" className="diagnostic-list-footer">
+              <Button
+                variant="subtle"
+                size="xs"
+                disabled={!offset}
+                onClick={() => setOffset(Math.max(0, offset - 50))}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="subtle"
+                size="xs"
+                disabled={offset + 50 >= total}
+                onClick={() => setOffset(offset + 50)}
+              >
+                Next
+              </Button>
+            </Group>
           )}
-          {flags.map((f) => (
-            <button
-              className={`diagnostic-run ${selected === f.id ? "selected" : ""}`}
-              key={f.id}
-              onClick={() => setSelected(f.id)}
-            >
-              <strong>{f.title}</strong>
-              <span>
-                {f.category} · {f.status === "resolved" ? "Reviewed" : "Open"}
-              </span>
-              <small>
-                {f.mode} · {new Date(f.createdAt).toLocaleString()}
-              </small>
-              {f.note && <span>{f.note.slice(0, 120)}</span>}
-            </button>
-          ))}
-          <Group justify="space-between">
-            <Button
-              variant="subtle"
-              disabled={!offset}
-              onClick={() => setOffset(Math.max(0, offset - 50))}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="subtle"
-              disabled={offset + 50 >= total}
-              onClick={() => setOffset(offset + 50)}
-            >
-              Next
-            </Button>
-          </Group>
         </aside>
         <article className="diagnostic-detail">
           {!detail ? (
-            <p>
+            <p className="diag-detail-empty">
               {selected
                 ? "Loading flag…"
                 : "Select a flag to inspect its preserved context."}
             </p>
           ) : (
             <>
-              <Group justify="space-between">
-                <h2>{detail.title}</h2>
-                <Badge color={detail.status === "open" ? "yellow" : "teal"}>
+              <div className="diag-detail-head">
+                <h3>{detail.title}</h3>
+                <Badge
+                  size="sm"
+                  variant="light"
+                  className="diag-status"
+                  color={detail.status === "open" ? "yellow" : "teal"}
+                >
                   {detail.status === "open" ? "Open" : "Reviewed"}
                 </Badge>
-              </Group>
-              <p>
+              </div>
+              <p className="diag-detail-meta">
                 {detail.category} · {detail.mode} ·{" "}
                 {new Date(detail.createdAt).toLocaleString()}
               </p>
               <p className="review-flag-note">
                 {detail.note || "No note added."}
               </p>
-              <p>{detail.bundle.traceNote}</p>
-              <Group my="md">
-                <Button variant="default" onClick={download}>
+              <p className="diag-detail-usage">{detail.bundle.traceNote}</p>
+              <Group gap="xs" className="diag-detail-actions">
+                <Button variant="default" size="xs" onClick={download}>
                   Download review bundle
                 </Button>
                 <Button
                   variant="light"
+                  size="xs"
                   loading={busy}
                   onClick={() => void update()}
                 >

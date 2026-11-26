@@ -323,8 +323,8 @@ export default function ReflectionWorkspace({
         >
           <ArrowLeft size={18} />
         </Button>
-        <div>
-          <strong>{a.problem.title}</strong>
+        <div className="reflection-title">
+          <strong title={a.problem.title}>{a.problem.title}</strong>
           <span>
             {intakeActive ? "Initial reflection" : "Reflection"}
             {a.demonstration ? " · Demonstration" : ""}
@@ -340,7 +340,10 @@ export default function ReflectionWorkspace({
           </Button>
           <Button
             className={ready ? "button primary" : "button secondary"}
-            disabled={(intakeActive && !a.demonstration) || (intakeActive && savingIntake)}
+            disabled={
+              (intakeActive && !a.demonstration) ||
+              (intakeActive && savingIntake)
+            }
             onClick={() =>
               safe(async () => {
                 setPlaying(false);
@@ -412,7 +415,10 @@ export default function ReflectionWorkspace({
                 onJumpSeq={jumpToSeq}
                 onToggleDiff={() => {
                   setPlaying(false);
-                  if (!diff && selectedTimelineItem.endSeq > selectedTimelineItem.startSeq) {
+                  if (
+                    !diff &&
+                    selectedTimelineItem.endSeq > selectedTimelineItem.startSeq
+                  ) {
                     setSelectedSeq(selectedTimelineItem.endSeq);
                     setPlayhead(timeAtSequence(a, selectedTimelineItem.endSeq));
                   }
@@ -474,6 +480,13 @@ export default function ReflectionWorkspace({
                 <strong>
                   {time(playhead)} <span>/ {time(total)} solving</span>
                 </strong>
+                <span className="reflection-event">
+                  {seq === 0
+                    ? "Initial source"
+                    : seq === a.lastSeq
+                      ? "Final source"
+                      : event?.type}
+                </span>
                 <Button
                   className={loop ? "toggle active" : "toggle"}
                   aria-pressed={loop}
@@ -490,15 +503,10 @@ export default function ReflectionWorkspace({
                     label: value + "×",
                   }))}
                   allowDeselect={false}
-                  w={78}
+                  size="xs"
+                  w={68}
+                  comboboxProps={{ zIndex: 400 }}
                 />
-                <span className="reflection-event">
-                  {seq === 0
-                    ? "Initial source"
-                    : seq === a.lastSeq
-                      ? "Final source"
-                      : event?.type}
-                </span>
               </div>
               <Slider
                 aria-label="Recording playhead"
@@ -524,35 +532,41 @@ export default function ReflectionWorkspace({
                 <span>
                   Replay range · {time(range[0])}–{time(range[1])}
                 </span>
-                <Button
-                  className="text-button"
-                  onClick={() => {
-                    setPlaying(false);
-                    setRange([Math.min(playhead, range[1]), range[1]]);
-                  }}
+                <div
+                  className="reflection-range-actions"
+                  role="group"
+                  aria-label="Replay range controls"
                 >
-                  Set start here
-                </Button>
-                <Button
-                  className="text-button"
-                  onClick={() => {
-                    setPlaying(false);
-                    setRange([range[0], Math.max(playhead, range[0])]);
-                  }}
-                >
-                  Set end here
-                </Button>
-                <Button
-                  className="text-button"
-                  onClick={() => {
-                    setPlaying(false);
-                    setRange([0, total]);
-                    setFocused(null);
-                    setSelectedTimelineId(undefined);
-                  }}
-                >
-                  Full recording
-                </Button>
+                  <Button
+                    className="text-button"
+                    onClick={() => {
+                      setPlaying(false);
+                      setRange([Math.min(playhead, range[1]), range[1]]);
+                    }}
+                  >
+                    Set start here
+                  </Button>
+                  <Button
+                    className="text-button"
+                    onClick={() => {
+                      setPlaying(false);
+                      setRange([range[0], Math.max(playhead, range[0])]);
+                    }}
+                  >
+                    Set end here
+                  </Button>
+                  <Button
+                    className="text-button"
+                    onClick={() => {
+                      setPlaying(false);
+                      setRange([0, total]);
+                      setFocused(null);
+                      setSelectedTimelineId(undefined);
+                    }}
+                  >
+                    Full recording
+                  </Button>
+                </div>
               </div>
               <RangeSlider
                 aria-label="Replay range"
@@ -890,7 +904,7 @@ export default function ReflectionWorkspace({
                     <div ref={bottom} />
                   </div>
                   {closed ? (
-                    <div className="reflection-composer">
+                    <div className="reflection-composer saved">
                       <p>This reflection is saved.</p>
                       <Button
                         className="button secondary"
@@ -961,7 +975,7 @@ export default function ReflectionWorkspace({
                   )}
                 </Tabs.Panel>
                 <Tabs.Panel value="java-help" className="reflection-takeaways">
-                  <p className="small">
+                  <p className="small reflection-pane-note">
                     Reference questions and delivered answers from your
                     assessment. Delivery does not establish that an answer was
                     read or used.
@@ -990,6 +1004,13 @@ export default function ReflectionWorkspace({
                         {evaluation.summary}
                       </CoachText>
                       <ResearchSources research={evaluation.research} />
+                      <ReviewFlagButton
+                        target={{
+                          kind: "evaluation",
+                          attemptId: a.id,
+                          createdAt: evaluation.createdAt,
+                        }}
+                      />
                       {evaluation.questionReview && (
                         <details className="diagnostic-event">
                           <summary>
@@ -1008,13 +1029,6 @@ export default function ReflectionWorkspace({
                           setDraft(text);
                           setTab("conversation");
                           input.current?.focus();
-                        }}
-                      />
-                      <ReviewFlagButton
-                        target={{
-                          kind: "evaluation",
-                          attemptId: a.id,
-                          createdAt: evaluation.createdAt,
                         }}
                       />
                       <h3>What you demonstrated</h3>
@@ -1048,13 +1062,13 @@ export default function ReflectionWorkspace({
                           </p>
                         ))}
                       {ready && <p>We have enough context to move on.</p>}
-                      <p className="small">
+                      <p className="small reflection-pane-note">
                         These takeaways update as you add context. One attempt
                         does not establish lasting mastery.
                       </p>
                     </>
                   ) : (
-                    <p>
+                    <p className="reflection-pane-empty">
                       The coach will summarize what the attempt shows here.
                       Unanswered questions will guide the conversation.
                     </p>

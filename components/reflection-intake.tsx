@@ -110,7 +110,7 @@ export default function ReflectionIntakeForm({
         <Title order={2} size="h3">
           Quick check-in
         </Title>
-        <Text c="dimmed" size="sm" mt="xs">
+        <Text c="dimmed" size="sm" mt={4}>
           Review your solution, then share three quick answers.
         </Text>
       </div>
@@ -122,7 +122,7 @@ export default function ReflectionIntakeForm({
         }}
       >
         <div className="reflection-intake-fields">
-          <Stack gap="lg">
+          <Stack gap="md">
             <Radio.Group
               label="1. Have you seen or solved this problem before?"
               value={familiarity}
@@ -180,7 +180,8 @@ export default function ReflectionIntakeForm({
                 </>
               ) : analyzing ? (
                 <>
-                  <LoaderCircle size={14} /> Analyzing your recording…
+                  <LoaderCircle size={14} className="spin" /> Analyzing your
+                  recording…
                 </>
               ) : (
                 "Preparing your recording…"
@@ -201,7 +202,7 @@ export default function ReflectionIntakeForm({
           >
             Continue to reflection
           </Button>
-          <Group grow gap="xs" mt="xs">
+          <Group grow gap="xs">
             <Button
               type="button"
               variant="light"
@@ -226,7 +227,6 @@ export default function ReflectionIntakeForm({
             variant="subtle"
             size="xs"
             fullWidth
-            mt="xs"
             disabled={!hasFamiliarity || !!saving}
             loading={saving === "skip-checkin"}
             onClick={() => void submitSkipCheckIn()}

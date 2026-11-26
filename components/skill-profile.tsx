@@ -1,7 +1,17 @@
 "use client";
 import { useState } from "react";
-import { MultiSelect, NumberInput, Progress as MantineProgress } from "@mantine/core";
-import { RefreshCw, ShieldCheck, Sliders, Sparkles } from "lucide-react";
+import {
+  MultiSelect,
+  NumberInput,
+  Progress as MantineProgress,
+} from "@mantine/core";
+import {
+  ChevronDown,
+  RefreshCw,
+  ShieldCheck,
+  Sliders,
+  Sparkles,
+} from "lucide-react";
 import { Button, Panel } from "./ui";
 import { api } from "@/lib/browser";
 import {
@@ -21,8 +31,18 @@ export type RatingsProfileDto = {
   globalSigma: number;
   consecutiveMisses: number;
   complexityCalibration: {
-    time: { accurate: number; inaccurate: number; unsure: number; formatted: string };
-    space: { accurate: number; inaccurate: number; unsure: number; formatted: string };
+    time: {
+      accurate: number;
+      inaccurate: number;
+      unsure: number;
+      formatted: string;
+    };
+    space: {
+      accurate: number;
+      inaccurate: number;
+      unsure: number;
+      formatted: string;
+    };
   };
   domains: Array<{
     id: DomainId;
@@ -98,7 +118,9 @@ export function TodayRatingCard({
   const [retrying, setRetrying] = useState(false);
   const progressPct = Math.min(
     100,
-    Math.round((ratings.prescribedGradedCount / ratings.calibrationTarget) * 100),
+    Math.round(
+      (ratings.prescribedGradedCount / ratings.calibrationTarget) * 100,
+    ),
   );
   const syncedText =
     ratings.catalogSync.totalNum && ratings.catalogSync.lastCompletedAt === null
@@ -121,8 +143,13 @@ export function TodayRatingCard({
         <>
           <MantineProgress value={progressPct} size="sm" radius="xl" mb="xs" />
           <p className="small">
-            Complete {Math.max(0, ratings.calibrationTarget - ratings.prescribedGradedCount)} more
-            prescribed timed sessions to reveal your hierarchical rating profile.
+            Complete{" "}
+            {Math.max(
+              0,
+              ratings.calibrationTarget - ratings.prescribedGradedCount,
+            )}{" "}
+            more prescribed timed sessions to reveal your hierarchical rating
+            profile.
           </p>
         </>
       ) : (
@@ -145,7 +172,8 @@ export function TodayRatingCard({
         <div className="rating-retry-banner">
           <span className="small">
             {ratings.failedJobCount} rating update
-            {ratings.failedJobCount > 1 ? "s" : ""} paused due to AI timeout/outage.
+            {ratings.failedJobCount > 1 ? "s" : ""} paused due to AI
+            timeout/outage.
           </span>
           <Button
             className="text-button"
@@ -159,7 +187,8 @@ export function TodayRatingCard({
               }
             }}
           >
-            <RefreshCw size={13} /> {retrying ? "Retrying…" : "Retry rating update"}
+            <RefreshCw size={13} />{" "}
+            {retrying ? "Retrying…" : "Retry rating update"}
           </Button>
         </div>
       )}
@@ -227,6 +256,36 @@ export function ProgressSkillProfile({
     }
   };
 
+  const calibrationPct = Math.min(
+    100,
+    Math.round(
+      (ratings.prescribedGradedCount / Math.max(1, ratings.calibrationTarget)) *
+        100,
+    ),
+  );
+  const complexity = (
+    label: string,
+    bucket: RatingsProfileDto["complexityCalibration"]["time"],
+    note: string,
+  ) => (
+    <Panel className="panel rating-tile" title={bucket.formatted}>
+      <span className="stat-label">{label}</span>
+      <strong className="rating-tile-value">
+        {bucket.accurate} of {bucket.accurate + bucket.inaccurate}
+        <span className="rating-tile-unit">accurate</span>
+      </strong>
+      <p>
+        {bucket.unsure} unsure · {note}
+      </p>
+    </Panel>
+  );
+  const conceptCounts = (["applied", "coached", "probed", "unseen"] as const)
+    .map((state) => ({
+      state,
+      count: ratings.concepts.filter((c) => c.state === state).length,
+    }))
+    .filter((x) => x.count > 0);
+
   return (
     <div className="skill-profile-section">
       <div className="section-heading">
@@ -237,117 +296,150 @@ export function ProgressSkillProfile({
             : `Calibrating (${ratings.prescribedGradedCount}/4)`}
         </span>
       </div>
-      <div className="stats-grid">
-        <Panel className="panel">
+      <div className="rating-tiles">
+        <Panel className="panel rating-tile">
           <span className="stat-label">Global skill</span>
-          <strong>{ratings.revealed ? ratings.revealText : "Calibrating"}</strong>
+          <strong
+            className={
+              ratings.revealed
+                ? "rating-tile-value"
+                : "rating-tile-value is-status"
+            }
+          >
+            {ratings.revealed ? ratings.revealText : "Calibrating"}
+          </strong>
+          {!ratings.revealed && (
+            <MantineProgress
+              value={calibrationPct}
+              size="xs"
+              radius="xl"
+              className="rating-tile-progress"
+              aria-hidden
+            />
+          )}
           <p>{ratings.prescribedGradedCount} prescribed attempts graded</p>
         </Panel>
-        <Panel className="panel">
-          <span className="stat-label">Time complexity</span>
-          <strong>{ratings.complexityCalibration.time.formatted}</strong>
-          <p>Separate from domain ratings</p>
+        {complexity(
+          "Time complexity",
+          ratings.complexityCalibration.time,
+          "Separate from domain ratings",
+        )}
+        {complexity(
+          "Space complexity",
+          ratings.complexityCalibration.space,
+          "Counts exclude unsure answers",
+        )}
+      </div>
+
+      <div className="skill-profile-grid">
+        <Panel className="panel domain-ratings-panel">
+          <div className="section-heading">
+            <h3>13 Domain Ratings</h3>
+            <span>Implementation &amp; selection</span>
+          </div>
+          <div className="domain-ratings-table">
+            {ratings.domains.map((d) => (
+              <div key={d.id} className="domain-rating-row">
+                <div className="domain-rating-name">
+                  <strong>{d.label}</strong>
+                  {d.rusty && <span className="pill warn">Rusty</span>}
+                  {d.implProvisional && (
+                    <span className="pill">Provisional</span>
+                  )}
+                </div>
+                <div className="domain-rating-metrics">
+                  <span>
+                    Impl:{" "}
+                    <strong>{ratings.revealed ? d.implDisplay : "-"}</strong>{" "}
+                    <small>(±{d.implSigma})</small>
+                  </span>
+                  <span>
+                    Select:{" "}
+                    <strong>{ratings.revealed ? d.selDisplay : "-"}</strong>{" "}
+                    <small>(±{d.selSigma})</small>
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
         </Panel>
-        <Panel className="panel">
-          <span className="stat-label">Space complexity</span>
-          <strong>{ratings.complexityCalibration.space.formatted}</strong>
-          <p>Counts exclude unsure answers</p>
+
+        <Panel className="panel director-prefs-panel">
+          <div className="section-heading">
+            <h3>
+              <Sliders size={16} /> Practice focus &amp; time cap
+            </h3>
+          </div>
+          <div className="director-prefs-grid">
+            <MultiSelect
+              label="Focus domains (up to 3)"
+              description="Slot 0 Growth dedicates priority turns to eligible pinned domains."
+              placeholder={focusDomains.length ? undefined : "No focus domains"}
+              data={domainOptions}
+              value={focusDomains}
+              onChange={(vals) => setFocusDomains(vals.slice(0, 3))}
+              maxValues={3}
+              clearable
+            />
+            <MultiSelect
+              label="Muted domains"
+              description="Keep at least 4 Easy-backed domains active."
+              placeholder={mutedDomains.length ? undefined : "No muted domains"}
+              data={domainOptions}
+              value={mutedDomains}
+              onChange={setMutedDomains}
+              clearable
+            />
+            <NumberInput
+              label="Max session minutes (10–45)"
+              description="Filters problem difficulty to fit your clock."
+              min={10}
+              max={45}
+              value={maxMinutes}
+              onChange={setMaxMinutes}
+              placeholder="No cap"
+              allowDecimal={false}
+            />
+          </div>
+          <Button
+            className="button secondary"
+            disabled={saving}
+            onClick={() => void savePrefs()}
+          >
+            {saving ? "Saving preferences…" : "Save curriculum preferences"}
+          </Button>
         </Panel>
       </div>
 
-      <Panel className="panel">
-        <div className="section-heading">
-          <h3>
-            <Sliders size={16} /> Practice focus &amp; time cap
-          </h3>
-        </div>
-        <div className="director-prefs-grid">
-          <MultiSelect
-            label="Focus domains (up to 3)"
-            description="Slot 0 Growth dedicates priority turns to eligible pinned domains."
-            data={domainOptions}
-            value={focusDomains}
-            onChange={(vals) => setFocusDomains(vals.slice(0, 3))}
-            maxValues={3}
-            clearable
-          />
-          <MultiSelect
-            label="Muted domains"
-            description="Keep at least 4 Easy-backed domains active."
-            data={domainOptions}
-            value={mutedDomains}
-            onChange={setMutedDomains}
-            clearable
-          />
-          <NumberInput
-            label="Max session minutes (10–45)"
-            description="Filters problem difficulty to fit your clock."
-            min={10}
-            max={45}
-            value={maxMinutes}
-            onChange={setMaxMinutes}
-            placeholder="No cap"
-            allowDecimal={false}
-          />
-        </div>
-        <Button
-          className="button secondary"
-          disabled={saving}
-          onClick={() => void savePrefs()}
-        >
-          {saving ? "Saving preferences…" : "Save curriculum preferences"}
-        </Button>
-      </Panel>
-
-      <Panel className="panel">
-        <div className="section-heading">
-          <h3>13 Domain Ratings</h3>
-          <span>Implementation &amp; selection</span>
-        </div>
-        <div className="domain-ratings-table">
-          {ratings.domains.map((d) => (
-            <div key={d.id} className="domain-rating-row">
-              <div>
-                <strong>{d.label}</strong>
-                {d.rusty && <span className="pill warn">Rusty</span>}
-                {d.implProvisional && <span className="pill">Provisional</span>}
+      <Panel className="panel concept-panel">
+        <details className="concept-details">
+          <summary>
+            <h3>
+              <ShieldCheck size={16} /> Track B Concept Retention (24 Concepts)
+            </h3>
+            <span className="concept-summary-counts">
+              {conceptCounts.map((x) => `${x.count} ${x.state}`).join(" · ")}
+              {" · "}Stability in days
+            </span>
+            <ChevronDown size={16} className="concept-summary-chevron" />
+          </summary>
+          <div className="concept-stability-grid">
+            {ratings.concepts.map((c) => (
+              <div key={c.slug} className="concept-card-mini">
+                <div className="concept-card-head">
+                  <strong>{c.label}</strong>
+                  <span className="pill">{c.state}</span>
+                </div>
+                <small>
+                  {c.domainLabel} · Stability: {c.stabilityDays}d
+                  {c.retrievability !== null
+                    ? ` · Recall ${Math.round(c.retrievability * 100)}%`
+                    : ""}
+                </small>
               </div>
-              <div className="domain-rating-metrics">
-                <span>
-                  Impl: <strong>{ratings.revealed ? d.implDisplay : "-"}</strong>{" "}
-                  <small>(±{d.implSigma})</small>
-                </span>
-                <span>
-                  Select: <strong>{ratings.revealed ? d.selDisplay : "-"}</strong>{" "}
-                  <small>(±{d.selSigma})</small>
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Panel>
-
-      <Panel className="panel">
-        <div className="section-heading">
-          <h3>
-            <ShieldCheck size={16} /> Track B Concept Retention (24 Concepts)
-          </h3>
-          <span>Stability in days</span>
-        </div>
-        <div className="concept-stability-grid">
-          {ratings.concepts.map((c) => (
-            <div key={c.slug} className="concept-card-mini">
-              <div className="concept-card-head">
-                <strong>{c.label}</strong>
-                <span className="pill">{c.state}</span>
-              </div>
-              <small>
-                {c.domainLabel} · Stability: {c.stabilityDays}d
-                {c.retrievability !== null ? ` · Recall ${Math.round(c.retrievability * 100)}%` : ""}
-              </small>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </details>
       </Panel>
     </div>
   );
